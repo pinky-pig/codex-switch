@@ -4,7 +4,6 @@ import Foundation
 struct GeneratedConfig {
   static let nodeBinPath = "__NODE_BIN__"
   static let runtimePath = "__RUNTIME_PATH__"
-  static let cliPath = "__CLI_PATH__"
   static let appIconName = "AppIcon.icns"
   static let statusIconName = "cxs-menubar-template-hires.png"
 }
@@ -61,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
+    ensureCliShims()
     setupStatusItem()
     refreshMenu()
   }
@@ -112,25 +112,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     appendQuickSwitchItems(to: menu)
 
     menu.addItem(.separator())
-    let refreshItem = NSMenuItem(title: "刷新", action: #selector(refreshMenuAction), keyEquivalent: "")
-    refreshItem.target = self
-    menu.addItem(refreshItem)
-
-    let openCliItem = NSMenuItem(title: "打开 CLI", action: #selector(openCli), keyEquivalent: "")
-    openCliItem.target = self
-    menu.addItem(openCliItem)
-
     let deleteAccountsItem = NSMenuItem(title: "删除账号", action: nil, keyEquivalent: "")
     deleteAccountsItem.submenu = buildDeleteAccountsSubmenu()
     menu.addItem(deleteAccountsItem)
 
-    let addAccountItem = NSMenuItem(title: "添加 Codex 账号", action: #selector(addAccount), keyEquivalent: "")
-    addAccountItem.target = self
+    let addAccountItem = NSMenuItem(title: "添加 Codex 账号", action: nil, keyEquivalent: "")
+    addAccountItem.submenu = buildAddAccountSubmenu()
     menu.addItem(addAccountItem)
-
-    let saveItem = NSMenuItem(title: "保存当前账号到工具", action: #selector(saveCurrentAccount), keyEquivalent: "")
-    saveItem.target = self
-    menu.addItem(saveItem)
 
     menu.addItem(.separator())
     addDisabledItem(title: "auth config", to: menu)
@@ -184,6 +172,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     return submenu
   }
 
+  private func buildAddAccountSubmenu() -> NSMenu {
+    let submenu = NSMenu()
+
+    let loginItem = NSMenuItem(title: "登录 ChatGPT 账号", action: #selector(addAccount), keyEquivalent: "")
+    loginItem.target = self
+    submenu.addItem(loginItem)
+
+    let saveItem = NSMenuItem(
+      title: "保存当前使用的 Codex 账号到工具",
+      action: #selector(saveCurrentAccount),
+      keyEquivalent: ""
+    )
+    saveItem.target = self
+    submenu.addItem(saveItem)
+
+    return submenu
+  }
+
   private func appendConfigItems(to menu: NSMenu) {
     guard let runtime = state?.runtime else {
       addDisabledItem(title: "n/a", to: menu)
@@ -206,10 +212,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     addDisabledItem(title: "读取状态失败", to: menu)
     addDisabledItem(title: message, to: menu)
     menu.addItem(.separator())
-
-    let refreshItem = NSMenuItem(title: "刷新", action: #selector(refreshMenuAction), keyEquivalent: "")
-    refreshItem.target = self
-    menu.addItem(refreshItem)
 
     let quitItem = NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "q")
     quitItem.target = self
@@ -325,42 +327,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     alert.runModal()
   }
 
-  private func openTerminal(command: String) throws {
-    let script = [
-      "tell application \"Terminal\"",
-      "activate",
-      "do script " + appleScriptQuote("zsh -lc \(shellQuote(command))"),
-      "end tell",
-    ].joined(separator: "\n")
-
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-    process.arguments = ["-e", script]
-
-    let errorPipe = Pipe()
-    process.standardError = errorPipe
-    process.standardOutput = Pipe()
-
-    try process.run()
-    process.waitUntilExit()
-
-    guard process.terminationStatus == 0 else {
-      let error = String(
-        data: errorPipe.fileHandleForReading.readDataToEndOfFile(),
-        encoding: .utf8
-      ) ?? "Failed to open Terminal."
-      throw CLIError.commandFailed(error)
-    }
-  }
-
   private func shellQuote(_ value: String) -> String {
     return "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
   }
 
-  private func appleScriptQuote(_ value: String) -> String {
-    return "\"" + value
-      .replacingOccurrences(of: "\\", with: "\\\\")
-      .replacingOccurrences(of: "\"", with: "\\\"") + "\""
+  private func nvmBinDirectories(homeDir: String) -> [String] {
+    let basePath = "\(homeDir)/.nvm/versions/node"
+    guard let entries = try? FileManager.default.contentsOfDirectory(atPath: basePath) else {
+      return []
+    }
+
+    return entries.map { "\(basePath)/\($0)/bin" }
+  }
+
+  private func ensureCliShims() {
+    let fileManager = FileManager.default
+    let homeDir = fileManager.homeDirectoryForCurrentUser.path
+    var candidateDirs: [String] = []
+    candidateDirs.append(contentsOf: [
+      "/opt/homebrew/bin",
+      "/usr/local/bin",
+      "\(homeDir)/.nvm/current/bin",
+      "\(homeDir)/.local/bin",
+      "\(homeDir)/bin",
+    ])
+    candidateDirs.append(contentsOf: nvmBinDirectories(homeDir: homeDir))
+    var seenDirs = Set<String>()
+    let appBundlePath = Bundle.main.bundlePath
+
+    let script = """
+    #!/bin/sh
+    open \(shellQuote(appBundlePath))
+    """
+
+    for dir in candidateDirs {
+      guard seenDirs.insert(dir).inserted else {
+        continue
+      }
+
+      do {
+        try fileManager.createDirectory(
+          at: URL(fileURLWithPath: dir),
+          withIntermediateDirectories: true
+        )
+
+        guard fileManager.isWritableFile(atPath: dir) else {
+          continue
+        }
+
+        for name in ["codex-switch", "cxs"] {
+          let target = URL(fileURLWithPath: dir).appendingPathComponent(name)
+          if fileManager.fileExists(atPath: target.path) {
+            try fileManager.removeItem(at: target)
+          }
+          try script.write(to: target, atomically: true, encoding: .utf8)
+          try fileManager.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: target.path
+          )
+        }
+
+        return
+      } catch {
+        continue
+      }
+    }
   }
 
   private func showError(_ message: String) {
@@ -368,22 +399,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     alert.messageText = "codex-switch"
     alert.informativeText = message
     alert.runModal()
-  }
-
-  @objc private func refreshMenuAction() {
-    refreshMenu()
-  }
-
-  @objc private func openCli() {
-    let command =
-      "export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/sbin:/usr/sbin:/sbin:$PATH; " +
-      "\(shellQuote(GeneratedConfig.nodeBinPath)) \(shellQuote(GeneratedConfig.cliPath)) tui"
-
-    do {
-      try openTerminal(command: command)
-    } catch {
-      showError(error.localizedDescription)
-    }
   }
 
   @objc private func saveCurrentAccount() {

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "tsx src/cli.tsx",
-    "build": "tsup src/cli.tsx --format esm --dts --clean && tsup src/app-runtime.ts --format esm --clean false --out-dir dist",
+    "build": "tsup --config tsup.config.ts",
     "build:all": "npm run build && npm run build:menubar",
     "build:menubar": "bash scripts/build-menubar-app.sh",
     "open:app": "open dist/macos/'Codex Switch.app'",
