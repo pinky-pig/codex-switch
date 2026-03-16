@@ -1,4 +1,5 @@
 node_modules
 dist
+apps/*/dist
 .DS_Store
 .codex-switch

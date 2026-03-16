@@ -1,0 +1,11 @@
+{
+  "name": "@codex-switch/macos-menubar",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "bash scripts/build-menubar-app.sh",
+    "open:app": "open dist/'Codex Switch.app'",
+    "install:local": "pnpm build && open dist/'Codex Switch.app'",
+    "check": "swiftc -typecheck macos/menubar-swift/main.swift"
+  }
+}

@@ -1,35 +1,15 @@
 {
-  "name": "codex-switch",
-  "version": "0.1.0",
-  "description": "A modern TUI for saving and switching Codex ChatGPT account auth snapshots.",
-  "type": "module",
-  "bin": {
-    "codex-switch": "./dist/cli.js",
-    "cxs": "./dist/cli.js"
-  },
+  "name": "codex-switch-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.22.0",
   "scripts": {
-    "dev": "tsx src/cli.tsx",
-    "build": "tsup --config tsup.config.ts",
-    "build:all": "npm run build && npm run build:menubar",
-    "build:menubar": "bash scripts/build-menubar-app.sh",
-    "open:app": "open dist/macos/'Codex Switch.app'",
-    "install:local": "npm run build:menubar && npm link",
-    "start": "node dist/cli.js",
-    "check": "tsc --noEmit"
-  },
-  "engines": {
-    "node": ">=20"
-  },
-  "dependencies": {
-    "commander": "^14.0.1",
-    "ink": "^6.3.1",
-    "react": "^19.1.1"
-  },
-  "devDependencies": {
-    "@types/node": "^24.3.0",
-    "@types/react": "^19.1.10",
-    "tsup": "^8.5.0",
-    "tsx": "^4.20.5",
-    "typescript": "^5.9.2"
+    "dev": "pnpm --filter @codex-switch/cli dev",
+    "build": "pnpm --filter @codex-switch/cli build && pnpm --filter @codex-switch/macos-menubar build",
+    "build:cli": "pnpm --filter @codex-switch/cli build",
+    "build:menubar": "pnpm --filter @codex-switch/macos-menubar build",
+    "build:all": "pnpm build",
+    "check": "pnpm -r check",
+    "open:app": "pnpm --filter @codex-switch/macos-menubar open:app",
+    "install:local": "pnpm --filter @codex-switch/macos-menubar install:local"
   }
 }

@@ -5,7 +5,7 @@
 - 支持保存和切换多个 ChatGPT / Codex 账号快照
 - 支持 macOS 原生菜单栏应用
 - 支持 Node.js CLI / TUI
-- 支持从菜单栏直接打开 CLI
+- 仓库已整理为 `pnpm monorepo`，包含 `apps/cli` 和 `apps/macos-menubar`
 
 ## 截图
 
@@ -40,15 +40,15 @@ macOS 菜单栏：
 ### 方式 2：本地构建
 
 ```bash
-npm install
-npm run build:all
-npm run open:app
+pnpm install
+pnpm build
+pnpm open:app
 ```
 
 如果你还想全局使用 CLI：
 
 ```bash
-npm run install:local
+pnpm install:local
 ```
 
 安装后可以直接使用：
@@ -74,19 +74,19 @@ cxs
 本地构建菜单栏应用：
 
 ```bash
-npm install
-npm run build:menubar
-open dist/macos/'Codex Switch.app'
+pnpm install
+pnpm build:menubar
+open apps/macos-menubar/dist/'Codex Switch.app'
 ```
 
 构建产物位置：
 
-[`dist/macos/Codex Switch.app`](/Users/wangwenbo/Desktop/demo/codex-switch/dist/macos/Codex%20Switch.app)
+[`apps/macos-menubar/dist/Codex Switch.app`](/Users/wangwenbo/Desktop/demo/codex-switch/apps/macos-menubar/dist/Codex%20Switch.app)
 
 菜单栏关闭后，重新打开方式：
 
 - 双击 `Codex Switch.app`
-- 或执行 `npm run open:app`
+- 或执行 `pnpm open:app`
 - 或把它拖到 `Applications` / Dock 后再点击打开
 
 ## 全局命令
@@ -94,13 +94,13 @@ open dist/macos/'Codex Switch.app'
 构建 CLI：
 
 ```bash
-npm run build
+pnpm build:cli
 ```
 
-全局安装到本机：
+CLI 包位置：
 
 ```bash
-npm link
+apps/cli
 ```
 
 常用命令：
@@ -124,6 +124,13 @@ cxs add-account
 
 当前项目分两层：
 
+### Workspace 结构
+
+- `apps/cli`
+- `apps/macos-menubar`
+- `assets`
+- `docs`
+
 ### CLI / TUI
 
 - Node.js
@@ -143,11 +150,11 @@ cxs add-account
 
 仓库里仍然保留了早期 AppleScript 方案，用于记录原型演进：
 
-- [`macos/menubar-app/CodexSwitch.applescript`](/Users/wangwenbo/Desktop/demo/codex-switch/macos/menubar-app/CodexSwitch.applescript)
+- [`apps/macos-menubar/macos/menubar-app/CodexSwitch.applescript`](/Users/wangwenbo/Desktop/demo/codex-switch/apps/macos-menubar/macos/menubar-app/CodexSwitch.applescript)
 
 当前真正在线使用的是 Swift menubar 版本：
 
-- [`macos/menubar-swift/main.swift`](/Users/wangwenbo/Desktop/demo/codex-switch/macos/menubar-swift/main.swift)
+- [`apps/macos-menubar/macos/menubar-swift/main.swift`](/Users/wangwenbo/Desktop/demo/codex-switch/apps/macos-menubar/macos/menubar-swift/main.swift)
 
 ## 存储说明
 
@@ -202,8 +209,8 @@ cxs add-account
 如果你修改了项目代码，重新执行：
 
 ```bash
-npm run build:all
-npm link
+pnpm build
+pnpm install:local
 ```
 
 ## Release 文档
@@ -212,4 +219,3 @@ release 说明统一放在：
 
 - [`docs/releases/README.md`](/Users/wangwenbo/Desktop/demo/codex-switch/docs/releases/README.md)
 - [`docs/releases/v0.1.0.md`](/Users/wangwenbo/Desktop/demo/codex-switch/docs/releases/v0.1.0.md)
-

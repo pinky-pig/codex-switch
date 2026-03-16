@@ -1,30 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_OUTPUT_DIR="$ROOT_DIR/dist/macos"
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORKSPACE_ROOT="$(cd "$APP_DIR/../.." && pwd)"
+CLI_DIR="$WORKSPACE_ROOT/apps/cli"
+APP_OUTPUT_DIR="$APP_DIR/dist"
 APP_PATH="$APP_OUTPUT_DIR/Codex Switch.app"
 MACOS_DIR="$APP_PATH/Contents/MacOS"
 RESOURCES_DIR="$APP_PATH/Contents/Resources"
 PLIST_PATH="$APP_PATH/Contents/Info.plist"
 PKGINFO_PATH="$APP_PATH/Contents/PkgInfo"
-SWIFT_SOURCE="$ROOT_DIR/macos/menubar-swift/main.swift"
+SWIFT_SOURCE="$APP_DIR/macos/menubar-swift/main.swift"
 GENERATED_SWIFT="$APP_OUTPUT_DIR/GeneratedConfig.swift"
 BIN_NAME="CodexSwitchMenubar"
 RUNTIME_BIN_DIR="$HOME/.codex-switch/bin"
 RUNTIME_PATH="$RUNTIME_BIN_DIR/codex-switch-runtime.mjs"
 NODE_BIN_PATH="$(command -v node)"
-ICON_PATH="$ROOT_DIR/assets/icons/cxs.icns"
-STATUS_ICON_PATH="$ROOT_DIR/assets/icons/cxs-menubar-template-hires.png"
+ICON_PATH="$WORKSPACE_ROOT/assets/icons/cxs.icns"
+STATUS_ICON_PATH="$WORKSPACE_ROOT/assets/icons/cxs-menubar-template-hires.png"
 
-cd "$ROOT_DIR"
+cd "$WORKSPACE_ROOT"
 
-npm run build
+pnpm --filter @codex-switch/cli build
 mkdir -p "$APP_OUTPUT_DIR" "$RUNTIME_BIN_DIR"
 rm -rf "$APP_PATH"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-cp "$ROOT_DIR/dist/app-runtime.js" "$RUNTIME_PATH"
+cp "$CLI_DIR/dist/app-runtime.js" "$RUNTIME_PATH"
 chmod 755 "$RUNTIME_PATH"
 
 python3 - <<'PY' "$SWIFT_SOURCE" "$GENERATED_SWIFT" "$NODE_BIN_PATH" "$RUNTIME_PATH"

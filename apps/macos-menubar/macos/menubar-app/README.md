@@ -18,13 +18,13 @@ This directory contains a native macOS menu bar wrapper for `codex-switch`.
 From the repo root:
 
 ```bash
-npm run build:menubar
+pnpm build:menubar
 ```
 
 That creates:
 
 ```text
-dist/macos/Codex Switch.app
+apps/macos-menubar/dist/Codex Switch.app
 ```
 
 ## Notes
