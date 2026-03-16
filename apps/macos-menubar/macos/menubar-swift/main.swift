@@ -142,8 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     for account in accounts {
-      let expiresLabel = formatShortDate(account.summary.expiresAt)
-      let title = truncate("\(account.name) (\(expiresLabel))")
+      let title = truncate(account.name)
       let item = NSMenuItem(title: title, action: #selector(switchAccount(_:)), keyEquivalent: "")
       item.target = self
       item.representedObject = account.name
@@ -254,7 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.dateFormat = "MM/dd"
+    formatter.dateFormat = "MM/dd HH:mm"
     return formatter.string(from: date)
   }
 
