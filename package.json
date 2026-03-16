@@ -1,0 +1,32 @@
+{
+  "name": "codex-switch",
+  "version": "0.1.0",
+  "description": "A modern TUI for saving and switching Codex ChatGPT account auth snapshots.",
+  "type": "module",
+  "bin": {
+    "codex-switch": "./dist/cli.js",
+    "cxs": "./dist/cli.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.tsx",
+    "build": "tsup src/cli.tsx --format esm --dts --clean && tsup src/app-runtime.ts --format esm --clean false --out-dir dist",
+    "build:menubar": "bash scripts/build-menubar-app.sh",
+    "start": "node dist/cli.js",
+    "check": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "commander": "^14.0.1",
+    "ink": "^6.3.1",
+    "react": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.10",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
