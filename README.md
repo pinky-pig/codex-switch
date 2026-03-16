@@ -2,9 +2,10 @@
 
 `codex-switch` 是一个给 Codex 多账号切换准备的本地工具。
 
-- 支持把当前 `~/.codex/auth.json` 保存成账号快照
-- 支持在多个 ChatGPT / Codex 账号之间快速切换
-- 支持 macOS 原生菜单栏应用和命令行两种入口
+- 支持保存和切换多个 ChatGPT / Codex 账号快照
+- 支持 macOS 原生菜单栏应用
+- 支持 Node.js CLI / TUI
+- 支持从菜单栏直接打开 CLI
 
 ## 截图
 
@@ -16,6 +17,52 @@ macOS 菜单栏：
 
 ![codex-switch menubar](./docs/screenshots/menubar.png)
 
+## 快速启动
+
+### 方式 1：直接下载 Release 产物
+
+打开最新 release：
+
+[https://github.com/pinky-pig/codex-switch/releases/latest](https://github.com/pinky-pig/codex-switch/releases/latest)
+
+下载 macOS 产物后：
+
+1. 解压 `Codex-Switch-macOS.zip`
+2. 双击 `Codex Switch.app`
+3. 顶部菜单栏会出现 `codex-switch` 图标
+4. 点击菜单栏图标即可使用
+
+建议：
+
+1. 把 `Codex Switch.app` 拖到 `Applications`
+2. 再拖到 Dock，后续就和普通软件一样打开
+
+### 方式 2：本地构建
+
+```bash
+npm install
+npm run build:all
+npm run open:app
+```
+
+如果你还想全局使用 CLI：
+
+```bash
+npm run install:local
+```
+
+安装后可以直接使用：
+
+```bash
+codex-switch
+```
+
+或者：
+
+```bash
+cxs
+```
+
 ## 安装 menubar app
 
 要求：
@@ -24,35 +71,23 @@ macOS 菜单栏：
 - Node.js 20+
 - 已安装并登录过 `codex`
 
-安装依赖：
+本地构建菜单栏应用：
 
 ```bash
 npm install
-```
-
-构建菜单栏应用：
-
-```bash
 npm run build:menubar
-```
-
-启动菜单栏应用：
-
-```bash
 open dist/macos/'Codex Switch.app'
 ```
 
-账号快照默认保存在：
+构建产物位置：
 
-```text
-~/.codex-switch/accounts/<name>/
-```
+[`dist/macos/Codex Switch.app`](/Users/wangwenbo/Desktop/demo/codex-switch/dist/macos/Codex%20Switch.app)
 
-每个快照包含：
+菜单栏关闭后，重新打开方式：
 
-- `auth.json`
-- `meta.json`
-- `config.toml`，仅在使用 `--with-config` 保存时存在
+- 双击 `Codex Switch.app`
+- 或执行 `npm run open:app`
+- 或把它拖到 `Applications` / Dock 后再点击打开
 
 ## 全局命令
 
@@ -66,18 +101,6 @@ npm run build
 
 ```bash
 npm link
-```
-
-安装后可以直接使用：
-
-```bash
-codex-switch
-```
-
-或者：
-
-```bash
-cxs
 ```
 
 常用命令：
@@ -97,6 +120,49 @@ cxs save-current-auto
 cxs add-account
 ```
 
+## 技术栈
+
+当前项目分两层：
+
+### CLI / TUI
+
+- Node.js
+- TypeScript
+- Commander
+- React
+- Ink
+- tsup
+
+### macOS 菜单栏应用
+
+- Swift
+- AppKit / `NSStatusItem`
+- 原生 macOS `.app` 打包
+
+### 历史实现
+
+仓库里仍然保留了早期 AppleScript 方案，用于记录原型演进：
+
+- [`macos/menubar-app/CodexSwitch.applescript`](/Users/wangwenbo/Desktop/demo/codex-switch/macos/menubar-app/CodexSwitch.applescript)
+
+当前真正在线使用的是 Swift menubar 版本：
+
+- [`macos/menubar-swift/main.swift`](/Users/wangwenbo/Desktop/demo/codex-switch/macos/menubar-swift/main.swift)
+
+## 存储说明
+
+账号快照默认保存在：
+
+```text
+~/.codex-switch/accounts/<name>/
+```
+
+每个快照包含：
+
+- `auth.json`
+- `meta.json`
+- `config.toml`，仅在使用 `--with-config` 保存时存在
+
 ## 常见问题
 
 ### 1. 为什么切换账号后当前会话没有马上变？
@@ -105,18 +171,10 @@ cxs add-account
 
 处理方式：
 
-- 切换成功后，重启当前 VS Code / Codex / 终端中的会话
-- 重启后再继续使用新的账号
+1. 切换成功后，重启当前 VS Code / Codex / 终端中的会话
+2. 重启后再继续使用新的账号
 
-### 2. 为什么我在别的目录运行 `cxs` 看不到之前保存的账号？
-
-现在已经改成全局统一存储，账号不再跟当前目录绑定。默认目录是：
-
-```text
-~/.codex-switch/accounts/
-```
-
-### 3. 菜单栏应用和 CLI 用的是同一份账号数据吗？
+### 2. 菜单栏应用和 CLI 用的是同一份账号数据吗？
 
 是的。两者都读写同一个全局账号目录：
 
@@ -124,14 +182,14 @@ cxs add-account
 ~/.codex-switch/accounts/
 ```
 
-### 4. `config.toml` 会一起切换吗？
+### 3. `config.toml` 会一起切换吗？
 
 默认不会。
 
 - 普通切换只恢复 `auth.json`
 - 只有在保存时带了 `--with-config`，并且切换时显式使用 `--restore-config`，才会恢复对应的 `config.toml`
 
-### 5. 账号快照安全吗？
+### 4. 账号快照安全吗？
 
 需要注意：
 
@@ -139,13 +197,19 @@ cxs add-account
 - 本工具写入文件时使用的是 owner-only 权限
 - 不要把 `~/.codex-switch/` 或项目里的 `./.codex-switch/` 提交到 git
 
-### 6. 如何重新全局生效最新代码？
+### 5. 如何重新全局生效最新代码？
 
 如果你修改了项目代码，重新执行：
 
 ```bash
-npm run build
-npm run build:menubar
+npm run build:all
 npm link
 ```
+
+## Release 文档
+
+release 说明统一放在：
+
+- [`docs/releases/README.md`](/Users/wangwenbo/Desktop/demo/codex-switch/docs/releases/README.md)
+- [`docs/releases/v0.1.0.md`](/Users/wangwenbo/Desktop/demo/codex-switch/docs/releases/v0.1.0.md)
 

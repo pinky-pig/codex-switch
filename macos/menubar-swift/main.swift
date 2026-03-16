@@ -4,6 +4,7 @@ import Foundation
 struct GeneratedConfig {
   static let nodeBinPath = "__NODE_BIN__"
   static let runtimePath = "__RUNTIME_PATH__"
+  static let cliPath = "__CLI_PATH__"
   static let appIconName = "AppIcon.icns"
   static let statusIconName = "cxs-menubar-template-hires.png"
 }
@@ -114,6 +115,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let refreshItem = NSMenuItem(title: "刷新", action: #selector(refreshMenuAction), keyEquivalent: "")
     refreshItem.target = self
     menu.addItem(refreshItem)
+
+    let openCliItem = NSMenuItem(title: "打开 CLI", action: #selector(openCli), keyEquivalent: "")
+    openCliItem.target = self
+    menu.addItem(openCliItem)
 
     let deleteAccountsItem = NSMenuItem(title: "删除账号", action: nil, keyEquivalent: "")
     deleteAccountsItem.submenu = buildDeleteAccountsSubmenu()
@@ -320,6 +325,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     alert.runModal()
   }
 
+  private func openTerminal(command: String) throws {
+    let script = [
+      "tell application \"Terminal\"",
+      "activate",
+      "do script " + appleScriptQuote("zsh -lc \(shellQuote(command))"),
+      "end tell",
+    ].joined(separator: "\n")
+
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    process.arguments = ["-e", script]
+
+    let errorPipe = Pipe()
+    process.standardError = errorPipe
+    process.standardOutput = Pipe()
+
+    try process.run()
+    process.waitUntilExit()
+
+    guard process.terminationStatus == 0 else {
+      let error = String(
+        data: errorPipe.fileHandleForReading.readDataToEndOfFile(),
+        encoding: .utf8
+      ) ?? "Failed to open Terminal."
+      throw CLIError.commandFailed(error)
+    }
+  }
+
+  private func shellQuote(_ value: String) -> String {
+    return "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+  }
+
+  private func appleScriptQuote(_ value: String) -> String {
+    return "\"" + value
+      .replacingOccurrences(of: "\\", with: "\\\\")
+      .replacingOccurrences(of: "\"", with: "\\\"") + "\""
+  }
+
   private func showError(_ message: String) {
     let alert = NSAlert()
     alert.messageText = "codex-switch"
@@ -329,6 +372,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   @objc private func refreshMenuAction() {
     refreshMenu()
+  }
+
+  @objc private func openCli() {
+    let command =
+      "export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/sbin:/usr/sbin:/sbin:$PATH; " +
+      "\(shellQuote(GeneratedConfig.nodeBinPath)) \(shellQuote(GeneratedConfig.cliPath)) tui"
+
+    do {
+      try openTerminal(command: command)
+    } catch {
+      showError(error.localizedDescription)
+    }
   }
 
   @objc private func saveCurrentAccount() {
