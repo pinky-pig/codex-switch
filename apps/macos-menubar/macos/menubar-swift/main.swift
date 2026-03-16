@@ -44,6 +44,7 @@ enum CLIError: Error {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+  private static let suppressSwitchAlertKey = "suppressSwitchSuccessAlert"
   private var statusItem: NSStatusItem?
   private var state: AppState?
   private let isoFormatterWithFractional: ISO8601DateFormatter = {
@@ -302,6 +303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   private func runAsync(
     successMessage: String? = nil,
+    successAction: (() -> Void)? = nil,
     _ work: @escaping () throws -> Void,
   ) {
     DispatchQueue.global(qos: .userInitiated).async {
@@ -309,7 +311,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try work()
         DispatchQueue.main.async {
           self.refreshMenu()
-          if let successMessage {
+          if let successAction {
+            successAction()
+          } else if let successMessage {
             self.showInfo(successMessage)
           }
         }
@@ -324,6 +328,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     alert.messageText = "codex-switch"
     alert.informativeText = message
     alert.runModal()
+  }
+
+  private func showSwitchSuccessAlert() {
+    guard !UserDefaults.standard.bool(forKey: Self.suppressSwitchAlertKey) else {
+      return
+    }
+
+    let alert = NSAlert()
+    alert.messageText = "账号切换成功"
+    alert.informativeText = "请重启当前 VS Code / Codex / 终端中的会话，新的账号才会生效。"
+    alert.addButton(withTitle: "知道了")
+    alert.addButton(withTitle: "以后不再提示")
+
+    if alert.runModal() == .alertSecondButtonReturn {
+      UserDefaults.standard.set(true, forKey: Self.suppressSwitchAlertKey)
+    }
   }
 
   private func shellQuote(_ value: String) -> String {
@@ -417,7 +437,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       return
     }
 
-    runAsync(successMessage: "账号切换成功。\n请重启当前 VS Code / Codex / 终端中的会话，新的账号才会生效。") {
+    runAsync(successAction: { self.showSwitchSuccessAlert() }) {
       _ = try self.runCLI(arguments: ["use", name])
     }
   }
