@@ -205,6 +205,8 @@ async function fetchUsageRequest(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${accessToken}`,
     Accept: "application/json",
+    "Cache-Control": "no-cache, no-store, max-age=0",
+    Pragma: "no-cache",
     "User-Agent": "codex-switch/0.1.0",
   };
 
@@ -212,9 +214,13 @@ async function fetchUsageRequest(
     headers["ChatGPT-Account-Id"] = accountId;
   }
 
-  return fetch(USAGE_URL, {
+  const url = new URL(USAGE_URL);
+  url.searchParams.set("_ts", Date.now().toString());
+
+  return fetch(url, {
     method: "GET",
     headers,
+    cache: "no-store",
   });
 }
 
@@ -349,6 +355,7 @@ async function persistStoredAccountState(options: {
           planType: options.usage.planType,
           primary: options.usage.primary,
           secondary: options.usage.secondary,
+          error: undefined,
         }
       : options.account.meta.usage;
 

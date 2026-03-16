@@ -84,6 +84,18 @@ export interface StoredAccountUsage {
   error?: string;
 }
 
+export interface RefreshUsageResult {
+  updated: Array<{
+    name: string;
+    summary: AccountSummary;
+    usage?: StoredAccountUsage;
+  }>;
+  failed: Array<{
+    name: string;
+    error: string;
+  }>;
+}
+
 export interface SaveCurrentAccountAutoResult {
   created: boolean;
   account: StoredAccount;

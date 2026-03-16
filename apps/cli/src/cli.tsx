@@ -8,6 +8,7 @@ import {
   addCodexAccount,
   completeLoggedInAccount,
   getAppState,
+  refreshUsage,
   saveCurrentAccountAuto,
 } from "./lib/app.js";
 import {
@@ -149,6 +150,14 @@ async function run(): Promise<void> {
             : "auto",
       });
 
+      printJson(result);
+    });
+
+  program
+    .command("refresh-usage")
+    .description("Refresh remote quota usage for all saved accounts.")
+    .action(async () => {
+      const result = await refreshUsage();
       printJson(result);
     });
 

@@ -5,11 +5,13 @@ import { AUTH_FILE, CODEX_HOME, CONFIG_FILE, STORE_DIR } from "./constants.js";
 import {
   getCurrentAccount,
   listStoredAccounts,
+  refreshAllStoredAccountUsage,
   saveCurrentAccount,
 } from "./accounts.js";
 import type {
   AccountSummary,
   AddAccountFlowResult,
+  RefreshUsageResult,
   SaveCurrentAccountAutoResult,
 } from "../types.js";
 
@@ -207,7 +209,8 @@ export async function getAppState(): Promise<{
     includesConfig: boolean;
     active: boolean;
     summary: AccountSummary;
-    }>;
+    usage?: import("../types.js").StoredAccountUsage;
+  }>;
 }> {
   const current = await getCurrentAccount();
   const accounts = await listStoredAccounts();
@@ -228,6 +231,20 @@ export async function getAppState(): Promise<{
         account.meta.summary.accountId !== "unknown" &&
         account.meta.summary.accountId === current?.accountId,
       summary: account.meta.summary,
+      usage: account.meta.usage,
     })),
+  };
+}
+
+export async function refreshUsage(): Promise<RefreshUsageResult> {
+  const result = await refreshAllStoredAccountUsage();
+
+  return {
+    updated: result.updated.map((account) => ({
+      name: account.meta.name,
+      summary: account.meta.summary,
+      usage: account.meta.usage,
+    })),
+    failed: result.failed,
   };
 }

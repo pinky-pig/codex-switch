@@ -4,6 +4,7 @@ import {
   addCodexAccount,
   completeLoggedInAccount,
   getAppState,
+  refreshUsage,
   saveCurrentAccountAuto,
 } from "./lib/app.js";
 import { removeStoredAccount, switchToAccount } from "./lib/accounts.js";
@@ -56,6 +57,11 @@ async function run(): Promise<void> {
           : "auto";
 
       printJson(await addCodexAccount({ launchMode }));
+      return;
+    }
+
+    case "refresh-usage": {
+      printJson(await refreshUsage());
       return;
     }
 

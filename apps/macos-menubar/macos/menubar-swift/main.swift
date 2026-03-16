@@ -9,6 +9,20 @@ struct GeneratedConfig {
 }
 
 struct AppState: Decodable {
+  struct UsageWindow: Decodable {
+    let usedPercent: Int?
+    let windowMinutes: Int?
+    let resetsAt: String?
+  }
+
+  struct StoredUsage: Decodable {
+    let fetchedAt: String
+    let planType: String?
+    let primary: UsageWindow?
+    let secondary: UsageWindow?
+    let error: String?
+  }
+
   struct Runtime: Decodable {
     let codexHome: String
     let authPath: String
@@ -22,6 +36,7 @@ struct AppState: Decodable {
     let includesConfig: Bool
     let active: Bool
     let summary: AccountSummary
+    let usage: StoredUsage?
   }
 
   let storeDir: String
@@ -45,8 +60,10 @@ enum CLIError: Error {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private static let suppressSwitchAlertKey = "suppressSwitchSuccessAlert"
+  private static let autoRefreshInterval: TimeInterval = 600
   private var statusItem: NSStatusItem?
   private var state: AppState?
+  private var refreshTimer: Timer?
   private let isoFormatterWithFractional: ISO8601DateFormatter = {
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -64,6 +81,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ensureCliShims()
     setupStatusItem()
     refreshMenu()
+    refreshUsageInBackground()
+    scheduleAutoRefresh()
+  }
+
+  func applicationWillTerminate(_ notification: Notification) {
+    refreshTimer?.invalidate()
+    refreshTimer = nil
   }
 
   private func setupStatusItem() {
@@ -98,6 +122,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     return image
   }
 
+  private func scheduleAutoRefresh() {
+    refreshTimer?.invalidate()
+    refreshTimer = Timer.scheduledTimer(
+      withTimeInterval: Self.autoRefreshInterval,
+      repeats: true
+    ) { [weak self] _ in
+      self?.refreshUsageInBackground()
+    }
+  }
+
+  private func refreshUsageInBackground() {
+    runAsync {
+      _ = try self.runCLI(arguments: ["refresh-usage"])
+    }
+  }
+
   private func refreshMenu() {
     do {
       state = try fetchState()
@@ -113,6 +153,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     appendQuickSwitchItems(to: menu)
 
     menu.addItem(.separator())
+    let refreshQuotaItem = NSMenuItem(title: "刷新额度", action: #selector(refreshUsageMenu), keyEquivalent: "")
+    refreshQuotaItem.target = self
+    menu.addItem(refreshQuotaItem)
+
     let deleteAccountsItem = NSMenuItem(title: "删除账号", action: nil, keyEquivalent: "")
     deleteAccountsItem.submenu = buildDeleteAccountsSubmenu()
     menu.addItem(deleteAccountsItem)
@@ -143,11 +187,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     for account in accounts {
-      let title = truncate(account.name)
-      let item = NSMenuItem(title: title, action: #selector(switchAccount(_:)), keyEquivalent: "")
+      let item = NSMenuItem(title: account.name, action: #selector(switchAccount(_:)), keyEquivalent: "")
       item.target = self
       item.representedObject = account.name
       item.state = account.active ? .on : .off
+      item.attributedTitle = buildQuickSwitchTitle(name: account.name, usage: account.usage)
       menu.addItem(item)
     }
   }
@@ -256,6 +300,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.dateFormat = "MM/dd HH:mm"
     return formatter.string(from: date)
+  }
+
+  private func remainingPercent(_ usedPercent: Int?) -> Int? {
+    guard let usedPercent else {
+      return nil
+    }
+
+    return max(0, min(100, 100 - usedPercent))
+  }
+
+  private func formatQuotaSummary(_ usage: AppState.StoredUsage?) -> String {
+    guard let usage else {
+      return "quota n/a"
+    }
+
+    if usage.error != nil {
+      return "quota n/a"
+    }
+
+    guard
+      let primaryRemaining = remainingPercent(usage.primary?.usedPercent),
+      let secondaryRemaining = remainingPercent(usage.secondary?.usedPercent)
+    else {
+      return "quota n/a"
+    }
+
+    return "5h \(primaryRemaining)% · weekly \(secondaryRemaining)%"
+  }
+
+  private func buildQuickSwitchTitle(
+    name: String,
+    usage: AppState.StoredUsage?,
+  ) -> NSAttributedString {
+    let title = NSMutableAttributedString(
+      string: truncate(name, maxLength: 22),
+      attributes: [
+        .font: NSFont.menuFont(ofSize: NSFont.systemFontSize),
+        .foregroundColor: NSColor.labelColor,
+      ]
+    )
+
+    let quotaText = formatQuotaSummary(usage)
+    title.append(
+      NSAttributedString(
+        string: "\n    \(quotaText)",
+        attributes: [
+          .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+          .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+      )
+    )
+
+    return title
   }
 
   private func parseISODate(_ value: String?) -> Date? {
@@ -424,6 +521,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     runAsync {
       _ = try self.runCLI(arguments: ["save-current-auto"])
     }
+  }
+
+  @objc private func refreshUsageMenu() {
+    refreshUsageInBackground()
   }
 
   @objc private func addAccount() {
