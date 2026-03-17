@@ -313,14 +313,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     return formatter.string(from: date)
   }
 
-  private func formatMonthDayOnly(_ value: String?) -> String {
+  private func formatMonthDayTime(_ value: String?) -> String {
     guard let date = parseISODate(value) else {
       return "n/a"
     }
 
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.dateFormat = "MM/dd"
+    formatter.dateFormat = "MM/dd HH:mm"
     return formatter.string(from: date)
   }
 
@@ -349,7 +349,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     let primaryReset = formatTimeOnly(usage.primary?.resetsAt)
-    let secondaryReset = formatMonthDayOnly(usage.secondary?.resetsAt)
+    let secondaryReset = formatMonthDayTime(usage.secondary?.resetsAt)
     return "5h \(primaryRemaining)% (\(primaryReset)) · weekly \(secondaryRemaining)% (\(secondaryReset))"
   }
 
