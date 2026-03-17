@@ -302,6 +302,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     return formatter.string(from: date)
   }
 
+  private func formatTimeOnly(_ value: String?) -> String {
+    guard let date = parseISODate(value) else {
+      return "n/a"
+    }
+
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "HH:mm"
+    return formatter.string(from: date)
+  }
+
+  private func formatMonthDayOnly(_ value: String?) -> String {
+    guard let date = parseISODate(value) else {
+      return "n/a"
+    }
+
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "MM/dd"
+    return formatter.string(from: date)
+  }
+
   private func remainingPercent(_ usedPercent: Int?) -> Int? {
     guard let usedPercent else {
       return nil
@@ -326,7 +348,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       return "quota n/a"
     }
 
-    return "5h \(primaryRemaining)% · weekly \(secondaryRemaining)%"
+    let primaryReset = formatTimeOnly(usage.primary?.resetsAt)
+    let secondaryReset = formatMonthDayOnly(usage.secondary?.resetsAt)
+    return "5h \(primaryRemaining)% (\(primaryReset)) · weekly \(secondaryRemaining)% (\(secondaryReset))"
   }
 
   private func buildQuickSwitchTitle(
