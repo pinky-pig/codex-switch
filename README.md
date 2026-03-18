@@ -31,8 +31,8 @@ macOS 菜单栏：
 注意：
 - 当前 `.app` 不是完全自包含包，运行时仍然依赖本机 `node`
 - 只安装 `bun` 不够，必须有可执行的 `node`
-- 当前实现会在构建时记录 `node` 的绝对路径，所以更适合“在目标机器本地构建后使用”
-- `nvm`、`n`、Homebrew Node 都可以，只要 `command -v node` 能正常找到 Node
+- 当前实现会在运行时动态查找 `node`
+- 支持主流安装方式：`PATH`、Homebrew、`/usr/local/bin/node`、常见 `nvm` 目录
 
 ### 方式 2：本地构建
 
@@ -134,13 +134,19 @@ pnpm open:app
 - 所以机器上必须有 `node`
 - 只有 `bun` 没有 `node` 的环境，当前版本不能运行
 
-Node 来源不限：
+当前版本会优先尝试这些来源：
+- 当前环境 `PATH`
+- `/opt/homebrew/bin/node`
+- `/usr/local/bin/node`
+- `~/.nvm/versions/node/*/bin/node`
+
+Node 来源可以是：
 - `nvm`
 - `n`
 - Homebrew
 - 官方安装包
 
-只要 `node` 命令可用即可。
+只要以上主流路径中能找到 `node` 即可。
 
 ### 4. `config.toml` 会一起切换吗？
 

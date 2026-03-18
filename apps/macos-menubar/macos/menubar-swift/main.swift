@@ -2,7 +2,6 @@ import AppKit
 import Foundation
 
 struct GeneratedConfig {
-  static let nodeBinPath = "__NODE_BIN__"
   static let runtimePath = "__RUNTIME_PATH__"
   static let appIconName = "AppIcon.icns"
   static let statusIconName = "cxs-menubar-template-hires.png"
@@ -396,13 +395,134 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     return try JSONDecoder().decode(AppState.self, from: data)
   }
 
-  private func runCLI(arguments: [String]) throws -> String {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: GeneratedConfig.nodeBinPath)
-    process.arguments = [GeneratedConfig.runtimePath] + arguments
-    process.environment = [
-      "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/sbin:/usr/sbin:/sbin"
+  private func standardNodeSearchPaths(homeDir: String) -> [String] {
+    [
+      "/opt/homebrew/bin/node",
+      "/usr/local/bin/node",
+      "\(homeDir)/.nvm/current/bin/node",
     ]
+  }
+
+  private func parseSemver(_ value: String) -> [Int] {
+    let normalized = value.hasPrefix("v") ? String(value.dropFirst()) : value
+    return normalized.split(separator: ".").map { Int($0) ?? 0 }
+  }
+
+  private func nvmNodeCandidates(homeDir: String) -> [String] {
+    let baseURL = URL(fileURLWithPath: "\(homeDir)/.nvm/versions/node", isDirectory: true)
+    guard
+      let directories = try? FileManager.default.contentsOfDirectory(
+        at: baseURL,
+        includingPropertiesForKeys: [.isDirectoryKey],
+        options: [.skipsHiddenFiles]
+      )
+    else {
+      return []
+    }
+
+    let sortedDirectories = directories.sorted { lhs, rhs in
+      let leftVersion = parseSemver(lhs.lastPathComponent)
+      let rightVersion = parseSemver(rhs.lastPathComponent)
+      return leftVersion.lexicographicallyPrecedes(rightVersion) == false
+    }
+
+    return sortedDirectories.map { $0.appendingPathComponent("bin/node").path }
+  }
+
+  private func augmentedPath(homeDir: String) -> String {
+    var entries = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+      .split(separator: ":")
+      .map(String.init)
+
+    entries.append(contentsOf: [
+      "/opt/homebrew/bin",
+      "/usr/local/bin",
+      "/usr/bin",
+      "/bin",
+      "/opt/homebrew/sbin",
+      "/usr/sbin",
+      "/sbin",
+      "\(homeDir)/.nvm/current/bin",
+    ])
+
+    for candidate in nvmNodeCandidates(homeDir: homeDir) {
+      let binDir = URL(fileURLWithPath: candidate).deletingLastPathComponent().path
+      entries.append(binDir)
+    }
+
+    var seen = Set<String>()
+    return entries.filter { entry in
+      guard !entry.isEmpty else {
+        return false
+      }
+      return seen.insert(entry).inserted
+    }.joined(separator: ":")
+  }
+
+  private func resolveNodeFromPath(path: String) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+    process.arguments = ["node"]
+    process.environment = ["PATH": path]
+
+    let outputPipe = Pipe()
+    process.standardOutput = outputPipe
+    process.standardError = Pipe()
+
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      return nil
+    }
+
+    guard process.terminationStatus == 0 else {
+      return nil
+    }
+
+    let output = String(
+      data: outputPipe.fileHandleForReading.readDataToEndOfFile(),
+      encoding: .utf8
+    )?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard let output, !output.isEmpty else {
+      return nil
+    }
+
+    return output
+  }
+
+  private func resolveNodeBinary() -> String? {
+    let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+    let searchPath = augmentedPath(homeDir: homeDir)
+
+    if let nodeFromPath = resolveNodeFromPath(path: searchPath),
+       FileManager.default.isExecutableFile(atPath: nodeFromPath) {
+      return nodeFromPath
+    }
+
+    let explicitCandidates = standardNodeSearchPaths(homeDir: homeDir) + nvmNodeCandidates(homeDir: homeDir)
+    for candidate in explicitCandidates {
+      if FileManager.default.isExecutableFile(atPath: candidate) {
+        return candidate
+      }
+    }
+
+    return nil
+  }
+
+  private func runCLI(arguments: [String]) throws -> String {
+    guard let nodeBinary = resolveNodeBinary() else {
+      throw CLIError.commandFailed("未找到 Node.js，请安装 Node.js 20+。支持 PATH、Homebrew、/usr/local 和 nvm。只安装 bun 不行。")
+    }
+
+    let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: nodeBinary)
+    process.arguments = [GeneratedConfig.runtimePath] + arguments
+    var environment = ProcessInfo.processInfo.environment
+    environment["PATH"] = augmentedPath(homeDir: homeDir)
+    process.environment = environment
 
     let outputPipe = Pipe()
     let errorPipe = Pipe()

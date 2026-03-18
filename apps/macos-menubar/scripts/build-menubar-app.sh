@@ -15,7 +15,6 @@ GENERATED_SWIFT="$APP_OUTPUT_DIR/GeneratedConfig.swift"
 BIN_NAME="CodexSwitchMenubar"
 RUNTIME_BIN_DIR="$HOME/.codex-switch/bin"
 RUNTIME_PATH="$RUNTIME_BIN_DIR/codex-switch-runtime.mjs"
-NODE_BIN_PATH="$(command -v node)"
 ICON_PATH="$WORKSPACE_ROOT/assets/icons/cxs.icns"
 STATUS_ICON_PATH="$WORKSPACE_ROOT/assets/icons/cxs-menubar-template-hires.png"
 
@@ -29,14 +28,13 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$CLI_DIR/dist/app-runtime.js" "$RUNTIME_PATH"
 chmod 755 "$RUNTIME_PATH"
 
-python3 - <<'PY' "$SWIFT_SOURCE" "$GENERATED_SWIFT" "$NODE_BIN_PATH" "$RUNTIME_PATH"
+python3 - <<'PY' "$SWIFT_SOURCE" "$GENERATED_SWIFT" "$RUNTIME_PATH"
 from pathlib import Path
 import sys
 
 source = Path(sys.argv[1]).read_text()
-node_path = sys.argv[3].replace("\\", "\\\\").replace('"', '\\"')
-runtime_path = sys.argv[4].replace("\\", "\\\\").replace('"', '\\"')
-compiled = source.replace("__NODE_BIN__", node_path).replace("__RUNTIME_PATH__", runtime_path)
+runtime_path = sys.argv[3].replace("\\", "\\\\").replace('"', '\\"')
+compiled = source.replace("__RUNTIME_PATH__", runtime_path)
 Path(sys.argv[2]).write_text(compiled)
 PY
 
