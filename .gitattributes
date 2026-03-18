@@ -1,0 +1,15 @@
+docs/** linguist-documentation
+assets/** linguist-vendored
+
+apps/**/dist/** linguist-generated
+dist/** linguist-generated
+
+*.png binary
+*.icns binary
+*.zip binary
+
+*.tsx linguist-language=TypeScript
+*.ts linguist-language=TypeScript
+
+*.applescript linguist-detectable=false
+*.sh linguist-detectable=false
