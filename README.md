@@ -28,6 +28,12 @@ macOS 菜单栏：
 
 建议把 `Codex Switch.app` 拖到 `Applications`，以后就和普通软件一样打开。
 
+注意：
+- 当前 `.app` 不是完全自包含包，运行时仍然依赖本机 `node`
+- 只安装 `bun` 不够，必须有可执行的 `node`
+- 当前实现会在构建时记录 `node` 的绝对路径，所以更适合“在目标机器本地构建后使用”
+- `nvm`、`n`、Homebrew Node 都可以，只要 `command -v node` 能正常找到 Node
+
 ### 方式 2：本地构建
 
 ```bash
@@ -119,18 +125,35 @@ pnpm open:app
 ~/.codex-switch/accounts/
 ```
 
-### 3. `config.toml` 会一起切换吗？
+### 3. `.app` 运行需要 Node 吗？
+
+需要。
+
+- 当前 menubar 只是 Swift UI 壳
+- 账号切换、额度刷新、保存账号等逻辑仍通过 Node runtime 执行
+- 所以机器上必须有 `node`
+- 只有 `bun` 没有 `node` 的环境，当前版本不能运行
+
+Node 来源不限：
+- `nvm`
+- `n`
+- Homebrew
+- 官方安装包
+
+只要 `node` 命令可用即可。
+
+### 4. `config.toml` 会一起切换吗？
 
 默认不会。
 
 - 普通切换只恢复 `auth.json`
 - 只有在保存时带了 `--with-config`，并且切换时显式使用 `--restore-config`，才会恢复对应的 `config.toml`
 
-### 4. 账号快照安全吗？
+### 5. 账号快照安全吗？
 
 快照里保存的是高敏感认证信息。不要把 `~/.codex-switch/` 或项目里的 `./.codex-switch/` 提交到 git。
 
-### 5. 如何重新全局生效最新代码？
+### 6. 如何重新全局生效最新代码？
 
 如果你修改了项目代码，重新执行：
 
