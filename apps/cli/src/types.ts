@@ -5,11 +5,24 @@ export interface AuthTokens {
   account_id?: string | null;
 }
 
+export interface ImportedAuthMeta {
+  label?: string | null;
+  issuer?: string | null;
+  note?: string | null;
+  tags?: string[] | null;
+  status?: string | null;
+  workspaceId?: string | null;
+  chatgptAccountId?: string | null;
+  exportedAt?: number | string | null;
+  [key: string]: unknown;
+}
+
 export interface AuthFile {
   auth_mode?: string;
   OPENAI_API_KEY?: unknown;
   tokens?: AuthTokens;
   last_refresh?: string;
+  meta?: ImportedAuthMeta;
 }
 
 export interface JwtClaims {
@@ -50,6 +63,10 @@ export interface StoredAccount {
 
 export interface SaveAccountOptions {
   includeConfig?: boolean;
+}
+
+export interface ImportAccountOptions {
+  name?: string;
 }
 
 export interface SwitchAccountOptions {
@@ -98,6 +115,12 @@ export interface RefreshUsageResult {
 
 export interface SaveCurrentAccountAutoResult {
   created: boolean;
+  account: StoredAccount;
+}
+
+export interface ImportAccountResult {
+  created: boolean;
+  updated: boolean;
   account: StoredAccount;
 }
 

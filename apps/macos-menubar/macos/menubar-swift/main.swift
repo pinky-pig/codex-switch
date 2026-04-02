@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 struct GeneratedConfig {
   static let runtimePath = "__RUNTIME_PATH__"
@@ -221,6 +222,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let loginItem = NSMenuItem(title: "登录 ChatGPT 账号", action: #selector(addAccount), keyEquivalent: "")
     loginItem.target = self
     submenu.addItem(loginItem)
+
+    let importItem = NSMenuItem(title: "导入 auth.json", action: #selector(importAuthAccount), keyEquivalent: "")
+    importItem.target = self
+    submenu.addItem(importItem)
 
     let saveItem = NSMenuItem(
       title: "保存当前使用的 Codex 账号到工具",
@@ -511,6 +516,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     return nil
   }
 
+  private func runCommand(executable: String, arguments: [String]) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.arguments = arguments
+
+    let outputPipe = Pipe()
+    process.standardOutput = outputPipe
+    process.standardError = Pipe()
+
+    do {
+      try process.run()
+      process.waitUntilExit()
+    } catch {
+      return nil
+    }
+
+    guard process.terminationStatus == 0 else {
+      return nil
+    }
+
+    return String(
+      data: outputPipe.fileHandleForReading.readDataToEndOfFile(),
+      encoding: .utf8
+    )
+  }
+
+  private func parseKeyValueMap(_ text: String) -> [String: String] {
+    var values: [String: String] = [:]
+    for rawLine in text.split(separator: "\n") {
+      let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !line.isEmpty else {
+        continue
+      }
+
+      let parts = line.split(separator: ":", maxSplits: 1).map {
+        String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+      }
+      if parts.count == 2 {
+        values[parts[0]] = parts[1]
+      }
+    }
+    return values
+  }
+
+  private func systemProxyEnvironment() -> [String: String] {
+    guard let output = runCommand(executable: "/usr/sbin/scutil", arguments: ["--proxy"]) else {
+      return [:]
+    }
+
+    let values = parseKeyValueMap(output)
+    var env: [String: String] = [:]
+
+    var hasProxy = false
+
+    if values["HTTPEnable"] == "1",
+       let host = values["HTTPProxy"],
+       let port = values["HTTPPort"] {
+      let proxy = "http://\(host):\(port)"
+      env["HTTP_PROXY"] = proxy
+      env["http_proxy"] = proxy
+      hasProxy = true
+    }
+
+    if values["HTTPSEnable"] == "1",
+       let host = values["HTTPSProxy"],
+       let port = values["HTTPSPort"] {
+      let proxy = "http://\(host):\(port)"
+      env["HTTPS_PROXY"] = proxy
+      env["https_proxy"] = proxy
+      hasProxy = true
+    }
+
+    if values["SOCKSEnable"] == "1",
+       let host = values["SOCKSProxy"],
+       let port = values["SOCKSPort"] {
+      let proxy = "socks5://\(host):\(port)"
+      env["ALL_PROXY"] = proxy
+      env["all_proxy"] = proxy
+      hasProxy = true
+    }
+
+    env["NO_PROXY"] = "localhost,127.0.0.1,::1"
+    env["no_proxy"] = "localhost,127.0.0.1,::1"
+    if hasProxy {
+      // Node fetch only honors proxy vars when this flag is enabled.
+      env["NODE_USE_ENV_PROXY"] = "1"
+    }
+
+    return env
+  }
+
   private func runCLI(arguments: [String]) throws -> String {
     guard let nodeBinary = resolveNodeBinary() else {
       throw CLIError.commandFailed("未找到 Node.js，请安装 Node.js 20+。支持 PATH、Homebrew、/usr/local 和 nvm。只安装 bun 不行。")
@@ -522,6 +618,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     process.arguments = [GeneratedConfig.runtimePath] + arguments
     var environment = ProcessInfo.processInfo.environment
     environment["PATH"] = augmentedPath(homeDir: homeDir)
+    for (key, value) in systemProxyEnvironment() {
+      environment[key] = value
+    }
     process.environment = environment
 
     let outputPipe = Pipe()
@@ -674,6 +773,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   @objc private func addAccount() {
     runAsync {
       _ = try self.runCLI(arguments: ["add-account"])
+    }
+  }
+
+  @objc private func importAuthAccount() {
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = true
+    panel.canChooseDirectories = false
+    panel.allowsMultipleSelection = false
+    panel.allowedContentTypes = [.json]
+    panel.prompt = "导入"
+    panel.message = "选择要导入的 auth.json 文件。"
+
+    guard panel.runModal() == .OK, let url = panel.url else {
+      return
+    }
+
+    runAsync {
+      _ = try self.runCLI(arguments: ["import-auth", url.path])
     }
   }
 

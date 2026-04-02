@@ -13,6 +13,7 @@ import {
 } from "./lib/app.js";
 import {
   getCurrentAccount,
+  importAccountFromAuthFile,
   getRuntimeStatus,
   listStoredAccounts,
   removeStoredAccount,
@@ -50,6 +51,25 @@ async function run(): Promise<void> {
         includeConfig: Boolean(options.withConfig),
       });
       printJson(account.meta);
+    });
+
+  program
+    .command("import-auth")
+    .alias("import")
+    .description("Import an auth.json file as a saved account snapshot.")
+    .argument("<auth-path>", "path to auth.json")
+    .option("--name <name>", "saved account name")
+    .action(async (authPath: string, options: { name?: string }) => {
+      const result = await importAccountFromAuthFile(authPath, {
+        name: options.name,
+      });
+      printJson({
+        ok: true,
+        created: result.created,
+        updated: result.updated,
+        name: result.account.meta.name,
+        summary: result.account.meta.summary,
+      });
     });
 
   program

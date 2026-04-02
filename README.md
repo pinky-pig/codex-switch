@@ -3,6 +3,7 @@
 `codex-switch` 是一个给 Codex 多账号切换准备的本地工具。
 
 - 支持保存和切换多个 ChatGPT / Codex 账号快照
+- 支持直接导入外部 `auth.json` 为账号快照
 - 支持 macOS 原生菜单栏应用
 - 支持 Node.js CLI / TUI
 - 仓库已整理为 `pnpm monorepo`，包含 `apps/cli` 和 `apps/macos-menubar`
@@ -56,6 +57,7 @@ pnpm install:local
 ```bash
 codex-switch
 cxs
+cxs import-auth /path/to/auth.json
 ```
 
 ## 开发

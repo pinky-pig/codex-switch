@@ -4,6 +4,7 @@ import { Box, Text, useApp, useInput, useStdin } from "ink";
 import { addCodexAccount } from "./lib/app.js";
 import {
   getRuntimeStatus,
+  importAccountFromAuthFile,
   listStoredAccounts,
   removeStoredAccount,
   saveCurrentAccount,
@@ -14,6 +15,7 @@ import type { RuntimeStatus, StoredAccount } from "./types.js";
 type Mode =
   | "menu"
   | "login-running"
+  | "import-input"
   | "save-input"
   | "switch-list"
   | "switch-confirm"
@@ -36,6 +38,7 @@ const logoFrames = [
 
 const MENU_ITEMS = [
   "添加 Codex 账号",
+  "导入 auth.json 账号",
   "切换账号",
   "保存当前使用的 Codex 账号到工具中",
   "删除 Codex 账号",
@@ -85,6 +88,18 @@ function inferSuggestedName(status?: RuntimeStatus): string {
   return "account";
 }
 
+function normalizeImportedPath(input: string): string {
+  const trimmed = input.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed.replace(/\\ /g, " ");
+}
+
 function getWindowedItems<T>(items: T[], selectedIndex: number, windowSize = 8): T[] {
   if (items.length <= windowSize) {
     return items;
@@ -125,6 +140,7 @@ export function SwitchApp(): React.JSX.Element {
   const [mode, setMode] = useState<Mode>("menu");
   const [menuIndex, setMenuIndex] = useState(0);
   const [accountIndex, setAccountIndex] = useState(0);
+  const [importPath, setImportPath] = useState("");
   const [saveName, setSaveName] = useState("");
   const [includeConfig, setIncludeConfig] = useState(false);
   const [restoreConfig, setRestoreConfig] = useState(false);
@@ -208,6 +224,28 @@ export function SwitchApp(): React.JSX.Element {
     }
   }
 
+  async function runImportFlow(): Promise<void> {
+    try {
+      const result = await importAccountFromAuthFile(normalizeImportedPath(importPath));
+      await refresh();
+      setImportPath("");
+      setMode("menu");
+      setBanner({
+        tone: "success",
+        text: truncate(
+          result.updated
+            ? `已更新已保存账号 "${result.account.meta.name}"。`
+            : `已导入账号 "${result.account.meta.name}"。`,
+        ),
+      });
+    } catch (error: unknown) {
+      setBanner({
+        tone: "danger",
+        text: error instanceof Error ? error.message : "导入失败。",
+      });
+    }
+  }
+
   function goBack(): void {
     if (mode === "menu") {
       return;
@@ -244,6 +282,8 @@ export function SwitchApp(): React.JSX.Element {
         return "主菜单";
       case "login-running":
         return "主菜单 / 添加 Codex 账号";
+      case "import-input":
+        return "主菜单 / 导入 auth.json 账号";
       case "save-input":
         return "主菜单 / 保存当前使用的 Codex 账号到工具中";
       case "switch-list":
@@ -260,7 +300,9 @@ export function SwitchApp(): React.JSX.Element {
   }
 
   useInput((input, key) => {
-    if (input.toLowerCase() === "q") {
+    const isTextInputMode = mode === "save-input" || mode === "import-input";
+
+    if (!isTextInputMode && input.toLowerCase() === "q") {
       exit();
       return;
     }
@@ -274,7 +316,7 @@ export function SwitchApp(): React.JSX.Element {
       return;
     }
 
-    if (input.toLowerCase() === "r") {
+    if (!isTextInputMode && input.toLowerCase() === "r") {
       refresh()
         .then(() => {
           setBanner({ tone: "info", text: "已刷新。" });
@@ -311,6 +353,16 @@ export function SwitchApp(): React.JSX.Element {
         }
 
         if (menuIndex === 1) {
+          setMode("import-input");
+          setImportPath("");
+          setBanner({
+            tone: "info",
+            text: "粘贴 auth.json 路径后按回车导入。",
+          });
+          return;
+        }
+
+        if (menuIndex === 2) {
           if (accounts.length === 0) {
             setBanner({ tone: "danger", text: "还没有已保存账号。" });
             return;
@@ -324,7 +376,7 @@ export function SwitchApp(): React.JSX.Element {
           return;
         }
 
-        if (menuIndex === 2) {
+        if (menuIndex === 3) {
           setMode("save-input");
           setSaveName(inferSuggestedName(status));
           setBanner({
@@ -344,6 +396,29 @@ export function SwitchApp(): React.JSX.Element {
           tone: "info",
           text: "选择一个账号并按回车删除。",
         });
+      }
+
+      return;
+    }
+
+    if (mode === "import-input") {
+      if (key.backspace || key.delete) {
+        setImportPath((current) => current.slice(0, -1));
+        return;
+      }
+
+      if (key.return) {
+        if (!normalizeImportedPath(importPath)) {
+          setBanner({ tone: "danger", text: "必须输入 auth.json 路径。" });
+          return;
+        }
+
+        void runImportFlow();
+        return;
+      }
+
+      if (!key.ctrl && !key.meta && input.length === 1) {
+        setImportPath((current) => current + input);
       }
 
       return;
@@ -571,6 +646,16 @@ export function SwitchApp(): React.JSX.Element {
       return <Text color={muted}>正在等待 Codex 登录完成...</Text>;
     }
 
+    if (mode === "import-input") {
+      return (
+        <Box flexDirection="column" gap={1}>
+          <Text color="white">导入 auth.json</Text>
+          <TextInput value={importPath} placeholder="粘贴 auth.json 的完整路径" />
+          <Text color={muted}>会自动忽略无关 meta 字段，只保存可用认证信息。</Text>
+        </Box>
+      );
+    }
+
     if (mode === "save-input") {
       return (
         <Box flexDirection="column" gap={1}>
@@ -589,6 +674,8 @@ export function SwitchApp(): React.JSX.Element {
   const helperText =
     mode === "menu"
       ? "↑/↓ 移动  Enter 确认  R 刷新  Q 退出"
+      : mode === "import-input"
+        ? "回车导入  Esc 返回  Q 退出"
       : mode === "save-input"
         ? "回车保存  C 切换配置  Esc 返回  Q 退出"
         : mode === "switch-confirm"
