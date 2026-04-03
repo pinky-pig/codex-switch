@@ -7,7 +7,11 @@ import {
   refreshUsage,
   saveCurrentAccountAuto,
 } from "./lib/app.js";
-import { removeStoredAccount, switchToAccount } from "./lib/accounts.js";
+import {
+  importAccountFromAuthFile,
+  removeStoredAccount,
+  switchToAccount,
+} from "./lib/accounts.js";
 
 function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
@@ -62,6 +66,27 @@ async function run(): Promise<void> {
 
     case "refresh-usage": {
       printJson(await refreshUsage());
+      return;
+    }
+
+    case "import-auth":
+    case "import": {
+      const authPath = args[0];
+      if (!authPath) {
+        throw new Error("Missing auth.json path for import.");
+      }
+
+      const nameIndex = args.indexOf("--name");
+      const name =
+        nameIndex >= 0 && nameIndex + 1 < args.length ? args[nameIndex + 1] : undefined;
+      const result = await importAccountFromAuthFile(authPath, { name });
+      printJson({
+        ok: true,
+        created: result.created,
+        updated: result.updated,
+        name: result.account.meta.name,
+        summary: result.account.meta.summary,
+      });
       return;
     }
 

@@ -58,6 +58,15 @@ enum CLIError: Error {
   case invalidOutput(String)
 }
 
+extension CLIError: LocalizedError {
+  var errorDescription: String? {
+    switch self {
+    case .commandFailed(let message), .invalidOutput(let message):
+      return message
+    }
+  }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private static let suppressSwitchAlertKey = "suppressSwitchSuccessAlert"
   private static let autoRefreshInterval: TimeInterval = 600
