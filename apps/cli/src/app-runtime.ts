@@ -10,7 +10,9 @@ import {
 import {
   importAccountFromAuthFile,
   removeStoredAccount,
+  saveCustomApiAccount,
   switchToAccount,
+  testCustomApiConnection,
 } from "./lib/accounts.js";
 
 function printJson(value: unknown): void {
@@ -90,6 +92,74 @@ async function run(): Promise<void> {
       return;
     }
 
+    case "add-custom-api": {
+      function getOptionValue(flag: string): string | undefined {
+        const index = args.indexOf(flag);
+        if (index < 0 || index + 1 >= args.length) {
+          return undefined;
+        }
+
+        return args[index + 1];
+      }
+
+      const name = getOptionValue("--name");
+      const apiKey = getOptionValue("--api-key");
+      const baseUrl = getOptionValue("--base-url");
+
+      if (!name) {
+        throw new Error("Missing account name for custom API.");
+      }
+
+      if (!apiKey) {
+        throw new Error("Missing API key for custom API.");
+      }
+
+      if (!baseUrl) {
+        throw new Error("Missing base URL for custom API.");
+      }
+
+      const result = await saveCustomApiAccount({
+        name,
+        apiKey,
+        baseUrl,
+        model: getOptionValue("--model"),
+        reasoningEffort: getOptionValue("--reasoning-effort"),
+      });
+      printJson({
+        ok: true,
+        created: result.created,
+        updated: result.updated,
+        name: result.account.meta.name,
+        summary: result.account.meta.summary,
+      });
+      return;
+    }
+
+    case "test-custom-api": {
+      function getOptionValue(flag: string): string | undefined {
+        const index = args.indexOf(flag);
+        if (index < 0 || index + 1 >= args.length) {
+          return undefined;
+        }
+
+        return args[index + 1];
+      }
+
+      const apiKey = getOptionValue("--api-key");
+      const baseUrl = getOptionValue("--base-url");
+
+      if (!apiKey) {
+        throw new Error("Missing API key for custom API test.");
+      }
+
+      if (!baseUrl) {
+        throw new Error("Missing base URL for custom API test.");
+      }
+
+      printJson(await testCustomApiConnection({ apiKey, baseUrl }));
+      return;
+    }
+
     case "use": {
       const name = args[0];
       if (!name) {
@@ -98,10 +168,11 @@ async function run(): Promise<void> {
 
       const restoreConfig = args.includes("--restore-config");
       const account = await switchToAccount(name, { restoreConfig });
+      const appliedRestoreConfig = Boolean(restoreConfig || account.meta.requiresConfig);
       printJson({
         ok: true,
         active: account.meta.name,
-        restoreConfig,
+        restoreConfig: appliedRestoreConfig,
       });
       return;
     }

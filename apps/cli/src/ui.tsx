@@ -181,7 +181,7 @@ export function SwitchApp(): React.JSX.Element {
     return () => clearInterval(timer);
   }, []);
 
-  const currentEmail = status?.current?.email;
+  const currentEmail = status?.current?.email ?? status?.current?.name;
   const selectedAccount = accounts[accountIndex];
   const accountWindow = useMemo(
     () => getWindowedItems(accounts, accountIndex),
@@ -510,13 +510,36 @@ export function SwitchApp(): React.JSX.Element {
       setBanner({
         tone: "info",
         text: truncate(
-          `切换到 "${selectedAccount.meta.name}"？回车确认，Esc 取消。`,
+          selectedAccount.meta.requiresConfig
+            ? `切换到 "${selectedAccount.meta.name}"？将同时恢复 config.toml，回车确认。`
+            : `切换到 "${selectedAccount.meta.name}"？回车确认，Esc 取消。`,
         ),
       });
       return;
     }
 
     if (mode === "switch-confirm") {
+      if (selectedAccount.meta.requiresConfig) {
+        if (key.return) {
+          switchToAccount(selectedAccount.meta.name, { restoreConfig })
+            .then(async (account) => {
+              await refresh();
+              setMode("menu");
+              setBanner({
+                tone: "success",
+                text: truncate(`已切换到 "${account.meta.name}"。`),
+              });
+            })
+            .catch((error: unknown) => {
+              setBanner({
+                tone: "danger",
+                text: error instanceof Error ? error.message : "切换失败。",
+              });
+            });
+        }
+        return;
+      }
+
       if (input.toLowerCase() === "c") {
         setRestoreConfig((current) => !current);
         setBanner({
@@ -628,7 +651,9 @@ export function SwitchApp(): React.JSX.Element {
               <Text color={isSelected ? "white" : undefined}>
                 {truncate(account.meta.name, 20)}
               </Text>
-              <Text color={muted}>{truncate(fmt(account.meta.summary.email), 32)}</Text>
+              <Text color={muted}>
+                {truncate(fmt(account.meta.summary.email ?? account.meta.summary.name), 32)}
+              </Text>
               {isActive ? <Text color={success}>active</Text> : null}
             </Box>
           );
@@ -678,8 +703,10 @@ export function SwitchApp(): React.JSX.Element {
         ? "回车导入  Esc 返回  Q 退出"
       : mode === "save-input"
         ? "回车保存  C 切换配置  Esc 返回  Q 退出"
-        : mode === "switch-confirm"
-          ? `Enter 确认  C 恢复配置:${restoreConfig ? "开" : "关"}  Esc 返回  Q 退出`
+      : mode === "switch-confirm"
+          ? selectedAccount?.meta.requiresConfig
+            ? "Enter 确认  自动恢复配置  Esc 返回  Q 退出"
+            : `Enter 确认  C 恢复配置:${restoreConfig ? "开" : "关"}  Esc 返回  Q 退出`
           : "↑/↓ 移动  Enter 确认  Esc 返回  Q 退出";
 
   return (
@@ -761,7 +788,9 @@ export function SwitchApp(): React.JSX.Element {
             : mode === "save-input"
               ? " 回车保存  C 切换配置  Esc 返回 "
               : mode === "switch-confirm"
-                ? ` Enter 确认  C 恢复配置:${restoreConfig ? "开" : "关"}  Esc 返回 `
+                ? selectedAccount?.meta.requiresConfig
+                  ? " Enter 确认  自动恢复配置  Esc 返回 "
+                  : ` Enter 确认  C 恢复配置:${restoreConfig ? "开" : "关"}  Esc 返回 `
                 : " ↑/↓ 移动  Enter 确认  Esc 返回 "}
         </Text>
         <Text backgroundColor="#7f1d1d" color="#fecaca">

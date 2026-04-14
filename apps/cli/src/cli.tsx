@@ -18,7 +18,9 @@ import {
   listStoredAccounts,
   removeStoredAccount,
   saveCurrentAccount,
+  saveCustomApiAccount,
   switchToAccount,
+  testCustomApiConnection,
 } from "./lib/accounts.js";
 import { SwitchApp } from "./ui.js";
 
@@ -73,6 +75,53 @@ async function run(): Promise<void> {
     });
 
   program
+    .command("add-custom-api")
+    .description("Save a custom API-key-based account snapshot.")
+    .requiredOption("--name <name>", "saved account name")
+    .requiredOption("--api-key <apiKey>", "custom API key")
+    .requiredOption("--base-url <baseUrl>", "custom API base URL")
+    .option("--model <model>", "model name", "gpt-5.4")
+    .option("--reasoning-effort <reasoningEffort>", "reasoning effort", "xhigh")
+    .action(
+      async (options: {
+        name: string;
+        apiKey: string;
+        baseUrl: string;
+        model?: string;
+        reasoningEffort?: string;
+      }) => {
+        const result = await saveCustomApiAccount({
+          name: options.name,
+          apiKey: options.apiKey,
+          baseUrl: options.baseUrl,
+          model: options.model,
+          reasoningEffort: options.reasoningEffort,
+        });
+        printJson({
+          ok: true,
+          created: result.created,
+          updated: result.updated,
+          name: result.account.meta.name,
+          summary: result.account.meta.summary,
+        });
+      },
+    );
+
+  program
+    .command("test-custom-api")
+    .description("Test connectivity for a custom API-key-based provider.")
+    .requiredOption("--api-key <apiKey>", "custom API key")
+    .requiredOption("--base-url <baseUrl>", "custom API base URL")
+    .action(async (options: { apiKey: string; baseUrl: string }) => {
+      printJson(
+        await testCustomApiConnection({
+          apiKey: options.apiKey,
+          baseUrl: options.baseUrl,
+        }),
+      );
+    });
+
+  program
     .command("use")
     .description("Switch to a saved account snapshot.")
     .argument("<name>", "snapshot name")
@@ -81,10 +130,13 @@ async function run(): Promise<void> {
       const account = await switchToAccount(name, {
         restoreConfig: Boolean(options.restoreConfig),
       });
+      const appliedRestoreConfig = Boolean(
+        options.restoreConfig || account.meta.requiresConfig,
+      );
       printJson({
         ok: true,
         active: account.meta.name,
-        restoreConfig: Boolean(options.restoreConfig),
+        restoreConfig: appliedRestoreConfig,
       });
     });
 

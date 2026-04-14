@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 
 import {
   ACCOUNTS_DIR,
@@ -30,15 +31,28 @@ import type {
   RateLimitWindow,
   RuntimeStatus,
   SaveAccountOptions,
+  SaveCustomApiAccountOptions,
+  SaveCustomApiAccountResult,
   StoredAccountUsage,
   StoredAccount,
+  StoredAccountKind,
   StoredAccountMeta,
   SwitchAccountOptions,
+  TestCustomApiConnectionResult,
 } from "../types.js";
 
 const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const REFRESH_URL = "https://auth.openai.com/oauth/token";
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+
+type ParsedCustomConfig = {
+  modelProvider?: string;
+  model?: string;
+  baseUrl?: string;
+  providerName?: string;
+  wireApi?: string;
+  reasoningEffort?: string;
+};
 
 function decodeBase64Url(input: string): string {
   const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
@@ -65,7 +79,125 @@ function decodeJwtClaims(token?: string | null): JwtClaims | undefined {
   }
 }
 
-function buildAccountSummary(authFile: AuthFile): AccountSummary {
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function readTomlString(text: string, key: string): string | undefined {
+  const pattern = new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*\"([^\"]*)\"\\s*$`, "m");
+  const match = text.match(pattern);
+  const value = match?.[1]?.trim();
+  return value || undefined;
+}
+
+function readTomlSection(text: string, sectionName: string): string | undefined {
+  const lines = text.split("\n");
+  let inSection = false;
+  const collected: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^\[.*\]$/.test(trimmed)) {
+      if (trimmed === `[${sectionName}]`) {
+        inSection = true;
+        continue;
+      }
+
+      if (inSection) {
+        break;
+      }
+    }
+
+    if (inSection) {
+      collected.push(line);
+    }
+  }
+
+  if (collected.length === 0) {
+    return undefined;
+  }
+
+  return collected.join("\n");
+}
+
+function parseCustomConfig(configContent?: string): ParsedCustomConfig {
+  if (!configContent) {
+    return {};
+  }
+
+  const modelProvider = readTomlString(configContent, "model_provider") ?? "custom";
+  const section = readTomlSection(configContent, `model_providers.${modelProvider}`) ?? "";
+
+  return {
+    modelProvider,
+    model: readTomlString(configContent, "model"),
+    baseUrl: readTomlString(section, "base_url"),
+    providerName: readTomlString(section, "name"),
+    wireApi: readTomlString(section, "wire_api"),
+    reasoningEffort: readTomlString(configContent, "model_reasoning_effort"),
+  };
+}
+
+function isCustomApiAuthFile(authFile: AuthFile): boolean {
+  return (
+    typeof authFile.OPENAI_API_KEY === "string" &&
+    authFile.OPENAI_API_KEY.trim().length > 0 &&
+    !authFile.tokens?.access_token &&
+    !authFile.tokens?.id_token &&
+    !authFile.tokens?.refresh_token
+  );
+}
+
+function buildCustomApiFingerprint(apiKey: string, baseUrl?: string): string {
+  return createHash("sha256")
+    .update(`${baseUrl ?? ""}\n${apiKey}`)
+    .digest("hex")
+    .slice(0, 16);
+}
+
+function buildCustomApiAccountSummary(
+  authFile: AuthFile,
+  options?: {
+    configContent?: string;
+    fallbackName?: string;
+  },
+): AccountSummary {
+  const apiKey = typeof authFile.OPENAI_API_KEY === "string" ? authFile.OPENAI_API_KEY.trim() : "";
+  const config = parseCustomConfig(options?.configContent);
+
+  let host: string | undefined;
+  if (config.baseUrl) {
+    try {
+      host = new URL(config.baseUrl).host;
+    } catch {
+      host = undefined;
+    }
+  }
+
+  return {
+    accountId: `custom:${buildCustomApiFingerprint(apiKey, config.baseUrl)}`,
+    name:
+      options?.fallbackName?.trim() ||
+      config.providerName ||
+      (host ? `custom @ ${host}` : "custom-api"),
+    planType: config.model,
+    authMode: "api_key",
+    lastRefresh: undefined,
+    expiresAt: undefined,
+  };
+}
+
+function buildAccountSummary(
+  authFile: AuthFile,
+  options?: {
+    configContent?: string;
+    fallbackName?: string;
+  },
+): AccountSummary {
+  if (isCustomApiAuthFile(authFile)) {
+    return buildCustomApiAccountSummary(authFile, options);
+  }
+
   const claims =
     decodeJwtClaims(authFile.tokens?.id_token) ??
     decodeJwtClaims(authFile.tokens?.access_token);
@@ -100,9 +232,19 @@ function buildAccountSummary(authFile: AuthFile): AccountSummary {
   };
 }
 
-async function readAuthSummary(authPath: string): Promise<AccountSummary> {
+async function readAuthSummary(
+  authPath: string,
+  options?: {
+    configPath?: string;
+    fallbackName?: string;
+  },
+): Promise<AccountSummary> {
   const authFile = await readJsonFile<AuthFile>(authPath);
-  return buildAccountSummary(authFile);
+  const configContent = options?.configPath ? await safeReadText(options.configPath) : undefined;
+  return buildAccountSummary(authFile, {
+    configContent,
+    fallbackName: options?.fallbackName,
+  });
 }
 
 function getAccountDir(name: string): string {
@@ -258,6 +400,129 @@ function normalizeImportedAuthFile(authFile: AuthFile): AuthFile {
   return normalized;
 }
 
+function buildCustomApiAuthFile(apiKey: string): AuthFile {
+  const trimmedApiKey = apiKey.trim();
+  if (!trimmedApiKey) {
+    throw new Error("API key is required.");
+  }
+
+  return {
+    OPENAI_API_KEY: trimmedApiKey,
+  };
+}
+
+function normalizeBaseUrl(baseUrl: string): string {
+  return baseUrl.trim().replace(/\/+$/, "");
+}
+
+function quoteTomlString(value: string): string {
+  return JSON.stringify(value);
+}
+
+function buildCustomApiConfig(options: {
+  baseUrl: string;
+  model: string;
+  reasoningEffort: string;
+}): string {
+  return [
+    'model_provider = "custom"',
+    `model = ${quoteTomlString(options.model)}`,
+    "suppress_unstable_features_warning = true",
+    `model_reasoning_effort = ${quoteTomlString(options.reasoningEffort)}`,
+    "",
+    "[model_providers]",
+    "[model_providers.custom]",
+    'name = "custom"',
+    `base_url = ${quoteTomlString(options.baseUrl)}`,
+    'wire_api = "responses"',
+    "",
+  ].join("\n");
+}
+
+function removeRootKeyLine(text: string, key: string): string {
+  const pattern = new RegExp(`^\\s*${escapeRegex(key)}\\s*=.*(?:\\n|$)`, "gm");
+  return text.replace(pattern, "");
+}
+
+function removeTomlSection(text: string, sectionName: string): string {
+  const lines = text.split("\n");
+  const kept: string[] = [];
+  let skipping = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^\[.*\]$/.test(trimmed)) {
+      if (trimmed === `[${sectionName}]`) {
+        skipping = true;
+        continue;
+      }
+
+      if (skipping) {
+        skipping = false;
+      }
+    }
+
+    if (!skipping) {
+      kept.push(line);
+    }
+  }
+
+  return kept.join("\n");
+}
+
+function trimTomlDocument(text: string): string {
+  return text
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/^\s+/, "")
+    .replace(/\s+$/, "");
+}
+
+function mergeCustomApiConfig(existingContent: string | undefined, customContent: string): string {
+  const existing = existingContent ?? "";
+  const custom = parseCustomConfig(customContent);
+  const managedKeys = [
+    `model_provider = ${quoteTomlString(custom.modelProvider ?? "custom")}`,
+    `model = ${quoteTomlString(custom.model ?? "gpt-5.4")}`,
+    "suppress_unstable_features_warning = true",
+    `model_reasoning_effort = ${quoteTomlString(custom.reasoningEffort ?? "xhigh")}`,
+  ].join("\n");
+  const providerSection = [
+    "[model_providers.custom]",
+    `name = ${quoteTomlString(custom.providerName ?? "custom")}`,
+    `base_url = ${quoteTomlString(custom.baseUrl ?? "")}`,
+    `wire_api = ${quoteTomlString(custom.wireApi ?? "responses")}`,
+  ].join("\n");
+
+  let cleaned = existing;
+  for (const key of [
+    "model_provider",
+    "model",
+    "suppress_unstable_features_warning",
+    "model_reasoning_effort",
+  ]) {
+    cleaned = removeRootKeyLine(cleaned, key);
+  }
+  cleaned = removeTomlSection(cleaned, "model_providers.custom");
+  cleaned = trimTomlDocument(cleaned);
+
+  const firstSectionIndex = cleaned.search(/^\[/m);
+  const rootPart =
+    firstSectionIndex >= 0 ? cleaned.slice(0, firstSectionIndex).trim() : cleaned.trim();
+  const sectionPart =
+    firstSectionIndex >= 0 ? cleaned.slice(firstSectionIndex).trim() : "";
+  const hasModelProvidersSection = /^\[model_providers\]\s*$/m.test(sectionPart);
+
+  const rootOutput = trimTomlDocument([rootPart, managedKeys].filter(Boolean).join("\n\n"));
+  const sectionPieces = [sectionPart];
+  if (!hasModelProvidersSection) {
+    sectionPieces.push("[model_providers]");
+  }
+  sectionPieces.push(providerSection);
+  const sectionOutput = trimTomlDocument(sectionPieces.filter(Boolean).join("\n\n"));
+
+  return `${trimTomlDocument([rootOutput, sectionOutput].filter(Boolean).join("\n\n"))}\n`;
+}
+
 type UsageApiWindow = {
   used_percent?: number;
   reset_at?: number;
@@ -310,6 +575,17 @@ function mergeAccountSummary(
     lastRefresh: next.lastRefresh ?? previous.lastRefresh,
     expiresAt: next.expiresAt ?? previous.expiresAt,
   };
+}
+
+function inferStoredAccountKind(account: StoredAccount): StoredAccountKind {
+  return account.meta.kind ?? (account.meta.requiresConfig ? "custom-api" : "chatgpt");
+}
+
+function shouldRestoreConfigForAccount(
+  account: StoredAccount,
+  options: SwitchAccountOptions,
+): boolean {
+  return Boolean(options.restoreConfig || account.meta.requiresConfig);
 }
 
 function parseIsoDate(value?: string): Date | undefined {
@@ -720,7 +996,9 @@ export async function getCurrentAccount(): Promise<AccountSummary | undefined> {
     return undefined;
   }
 
-  return readAuthSummary(AUTH_FILE);
+  return readAuthSummary(AUTH_FILE, {
+    configPath: CONFIG_FILE,
+  });
 }
 
 export async function saveCurrentAccount(
@@ -738,7 +1016,10 @@ export async function saveCurrentAccount(
   const authTargetPath = path.join(accountDir, "auth.json");
   const configTargetPath = path.join(accountDir, "config.toml");
   const metaPath = path.join(accountDir, "meta.json");
-  const summary = await readAuthSummary(AUTH_FILE);
+  const summary = await readAuthSummary(AUTH_FILE, {
+    configPath: CONFIG_FILE,
+    fallbackName: safeName,
+  });
   const existingAccounts = await listStoredAccounts();
   const duplicate = existingAccounts.find((account) =>
     isSameAccount(account.meta.summary, summary),
@@ -762,6 +1043,8 @@ export async function saveCurrentAccount(
     savedAt: new Date().toISOString(),
     sourceAuthPath: AUTH_FILE,
     includesConfig,
+    kind: "chatgpt",
+    requiresConfig: false,
     summary,
   };
 
@@ -801,6 +1084,8 @@ export async function importAccountFromAuthFile(
       ...duplicate.meta,
       savedAt: new Date().toISOString(),
       sourceAuthPath: resolvedAuthPath,
+      kind: "chatgpt",
+      requiresConfig: false,
       summary,
     };
 
@@ -833,6 +1118,8 @@ export async function importAccountFromAuthFile(
     savedAt: new Date().toISOString(),
     sourceAuthPath: resolvedAuthPath,
     includesConfig: false,
+    kind: "chatgpt",
+    requiresConfig: false,
     summary,
   };
 
@@ -845,6 +1132,136 @@ export async function importAccountFromAuthFile(
       meta,
       authPath: authTargetPath,
     },
+  };
+}
+
+export async function saveCustomApiAccount(
+  options: SaveCustomApiAccountOptions,
+): Promise<SaveCustomApiAccountResult> {
+  const safeName = sanitizeName(options.name);
+  const trimmedBaseUrl = normalizeBaseUrl(options.baseUrl);
+  if (!trimmedBaseUrl) {
+    throw new Error("Base URL is required.");
+  }
+
+  const authFile = buildCustomApiAuthFile(options.apiKey);
+  const configContent = buildCustomApiConfig({
+    baseUrl: trimmedBaseUrl,
+    model: options.model?.trim() || "gpt-5.4",
+    reasoningEffort: options.reasoningEffort?.trim() || "xhigh",
+  });
+  const summary = buildAccountSummary(authFile, {
+    configContent,
+    fallbackName: safeName,
+  });
+
+  await ensureStore();
+
+  const existingAccounts = await listStoredAccounts();
+  const existingByName = existingAccounts.find((account) => account.meta.name === safeName);
+  const duplicate = existingAccounts.find((account) =>
+    isSameAccount(account.meta.summary, summary),
+  );
+  const accountToUpdate = existingByName ?? duplicate;
+  const targetName = accountToUpdate?.meta.name ?? safeName;
+  const accountDir = getAccountDir(targetName);
+  const authTargetPath = path.join(accountDir, "auth.json");
+  const configTargetPath = path.join(accountDir, "config.toml");
+  const metaPath = path.join(accountDir, "meta.json");
+
+  await ensureDir(accountDir);
+  await writeJsonSecure(authTargetPath, authFile);
+  await writeTextAtomic(configTargetPath, configContent);
+
+  const meta: StoredAccountMeta = {
+    name: targetName,
+    savedAt: new Date().toISOString(),
+    sourceAuthPath: authTargetPath,
+    includesConfig: true,
+    kind: "custom-api",
+    requiresConfig: true,
+    summary,
+    usage: accountToUpdate?.meta.usage,
+  };
+
+  await writeJsonSecure(metaPath, meta);
+
+  return {
+    created: !accountToUpdate,
+    updated: Boolean(accountToUpdate),
+    account: {
+      meta,
+      authPath: authTargetPath,
+      configPath: configTargetPath,
+    },
+  };
+}
+
+export async function testCustomApiConnection(options: {
+  apiKey: string;
+  baseUrl: string;
+}): Promise<TestCustomApiConnectionResult> {
+  const apiKey = options.apiKey.trim();
+  if (!apiKey) {
+    throw new Error("API key is required.");
+  }
+
+  const baseUrl = normalizeBaseUrl(options.baseUrl);
+  if (!baseUrl) {
+    throw new Error("Base URL is required.");
+  }
+
+  const targetUrl = `${baseUrl}/models`;
+  const response = await requestWithCurl({
+    url: targetUrl,
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      Accept: "application/json",
+      "User-Agent": "codex-switch/0.1.0",
+    },
+    timeoutSeconds: 20,
+  });
+
+  if (response.status < 200 || response.status >= 300) {
+    const preview = response.body.trim().slice(0, 240);
+    if (response.status === 401 || response.status === 403) {
+      return {
+        ok: false,
+        status: response.status,
+        message: preview || `Authentication failed (${response.status}).`,
+      };
+    }
+
+    return {
+      ok: false,
+      status: response.status,
+      message: preview || `Connection failed with status ${response.status}.`,
+    };
+  }
+
+  let message = `Connected successfully (${response.status}).`;
+
+  try {
+    const payload = JSON.parse(response.body) as {
+      data?: Array<{ id?: string }>;
+    };
+    const modelCount = payload.data?.length;
+    const firstModel = payload.data?.find((item) => typeof item.id === "string")?.id;
+
+    if (modelCount !== undefined && firstModel) {
+      message = `Connected successfully. Found ${modelCount} model(s). First: ${firstModel}`;
+    } else if (modelCount !== undefined) {
+      message = `Connected successfully. Found ${modelCount} model(s).`;
+    }
+  } catch {
+    // Keep the generic success message when the endpoint returns non-JSON content.
+  }
+
+  return {
+    ok: true,
+    status: response.status,
+    message,
   };
 }
 
@@ -906,10 +1323,16 @@ export async function switchToAccount(
   await ensureDir(CODEX_HOME);
   await writeTextAtomic(AUTH_FILE, authContent);
 
-  if (options.restoreConfig && account.configPath) {
+  if (shouldRestoreConfigForAccount(account, options) && account.configPath) {
     const configContent = await safeReadText(account.configPath);
     if (configContent) {
-      await writeTextAtomic(CONFIG_FILE, configContent);
+      if (inferStoredAccountKind(account) === "custom-api") {
+        const liveConfig = await safeReadText(CONFIG_FILE);
+        const mergedConfig = mergeCustomApiConfig(liveConfig, configContent);
+        await writeTextAtomic(CONFIG_FILE, mergedConfig);
+      } else {
+        await writeTextAtomic(CONFIG_FILE, configContent);
+      }
     }
   }
 
@@ -933,6 +1356,10 @@ export async function refreshAllStoredAccountUsage(): Promise<{
   for (const account of accounts) {
     try {
       const storedAuth = await readJsonFile<AuthFile>(account.authPath);
+      if (isCustomApiAuthFile(storedAuth) || inferStoredAccountKind(account) === "custom-api") {
+        updated.push(account);
+        continue;
+      }
       const result = await fetchUsageSummaryForAuth(storedAuth);
       const persisted = await persistStoredAccountState({
         account,

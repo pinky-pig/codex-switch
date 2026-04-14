@@ -46,11 +46,15 @@ export interface AccountSummary {
   expiresAt?: string;
 }
 
+export type StoredAccountKind = "chatgpt" | "custom-api";
+
 export interface StoredAccountMeta {
   name: string;
   savedAt: string;
   sourceAuthPath: string;
   includesConfig: boolean;
+  kind?: StoredAccountKind;
+  requiresConfig?: boolean;
   summary: AccountSummary;
   usage?: StoredAccountUsage;
 }
@@ -69,6 +73,14 @@ export interface ImportAccountOptions {
   name?: string;
 }
 
+export interface SaveCustomApiAccountOptions {
+  name: string;
+  apiKey: string;
+  baseUrl: string;
+  model?: string;
+  reasoningEffort?: string;
+}
+
 export interface SwitchAccountOptions {
   restoreConfig?: boolean;
 }
@@ -78,6 +90,7 @@ export interface RuntimeStatus {
   authPath: string;
   configPath: string;
   current?: AccountSummary;
+  currentAccountName?: string;
   codexProcesses: string[];
 }
 
@@ -122,6 +135,18 @@ export interface ImportAccountResult {
   created: boolean;
   updated: boolean;
   account: StoredAccount;
+}
+
+export interface SaveCustomApiAccountResult {
+  created: boolean;
+  updated: boolean;
+  account: StoredAccount;
+}
+
+export interface TestCustomApiConnectionResult {
+  ok: boolean;
+  message: string;
+  status?: number;
 }
 
 export interface AddAccountFlowResult {
