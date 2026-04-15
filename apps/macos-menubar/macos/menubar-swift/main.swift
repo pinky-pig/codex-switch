@@ -951,6 +951,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let refreshQuotaItem = NSMenuItem(title: "刷新额度", action: #selector(refreshUsageMenu), keyEquivalent: "")
     refreshQuotaItem.target = self
     menu.addItem(refreshQuotaItem)
+    let syncSessionsItem = NSMenuItem(
+      title: "同步会话到当前 Model Provider",
+      action: #selector(syncSessionsMenu),
+      keyEquivalent: ""
+    )
+    syncSessionsItem.target = self
+    menu.addItem(syncSessionsItem)
 
     let deleteAccountsItem = NSMenuItem(title: "删除账号", action: nil, keyEquivalent: "")
     deleteAccountsItem.submenu = buildDeleteAccountsSubmenu()
@@ -1633,6 +1640,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   @objc private func refreshUsageMenu() {
     refreshUsageInBackground()
+  }
+
+  private func sessionSyncSummaryMessage(from output: String) -> String {
+    guard let data = output.data(using: .utf8) else {
+      return "会话同步已完成。"
+    }
+
+    guard
+      let jsonObject = try? JSONSerialization.jsonObject(with: data),
+      let payload = jsonObject as? [String: Any]
+    else {
+      return "会话同步已完成。"
+    }
+
+    if let errorMessage = payload["error"] as? String, !errorMessage.isEmpty {
+      return "会话同步失败：\(errorMessage)"
+    }
+
+    let targetProvider = (payload["targetProvider"] as? String) ?? "当前 provider"
+    let changed = (payload["changed"] as? Bool) ?? false
+    let databases = (payload["databases"] as? [[String: Any]]) ?? []
+    let updatedThreads = databases.reduce(0) { partial, database in
+      partial + ((database["updatedThreads"] as? Int) ?? 0)
+    }
+
+    if changed {
+      return "会话同步完成，已同步 \(updatedThreads) 条会话到 \(targetProvider)。"
+    }
+
+    return "会话已是最新，无需同步（\(targetProvider)）。"
+  }
+
+  @objc private func syncSessionsMenu() {
+    DispatchQueue.global(qos: .userInitiated).async {
+      do {
+        let output = try self.runCLI(arguments: ["sync-sessions"])
+        let message = self.sessionSyncSummaryMessage(from: output)
+        DispatchQueue.main.async {
+          self.refreshMenu()
+          self.showInfo(message)
+        }
+      } catch {
+        DispatchQueue.main.async {
+          self.showError(self.describeError(error))
+        }
+      }
+    }
   }
 
   @objc private func addAccount() {

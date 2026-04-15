@@ -1580,7 +1580,7 @@ export async function switchToAccount(
   const restoreConfig = shouldRestoreConfigForAccount(account, options);
   let sessionSync: SessionSyncResult | undefined;
 
-  if (options.syncSessions !== false) {
+  if (options.syncSessions === true) {
     try {
       sessionSync = await syncSessionsToCurrentProvider();
     } catch (error) {
