@@ -522,12 +522,12 @@ export function SwitchApp(): React.JSX.Element {
       if (selectedAccount.meta.requiresConfig) {
         if (key.return) {
           switchToAccount(selectedAccount.meta.name, { restoreConfig })
-            .then(async (account) => {
+            .then(async (result) => {
               await refresh();
               setMode("menu");
               setBanner({
                 tone: "success",
-                text: truncate(`已切换到 "${account.meta.name}"。`),
+                text: truncate(`已切换到 "${result.account.meta.name}"。`),
               });
             })
             .catch((error: unknown) => {
@@ -551,12 +551,12 @@ export function SwitchApp(): React.JSX.Element {
 
       if (key.return) {
         switchToAccount(selectedAccount.meta.name, { restoreConfig })
-          .then(async (account) => {
+          .then(async (result) => {
             await refresh();
             setMode("menu");
             setBanner({
               tone: "success",
-              text: truncate(`已切换到 "${account.meta.name}"。`),
+              text: truncate(`已切换到 "${result.account.meta.name}"。`),
             });
           })
           .catch((error: unknown) => {

@@ -77,6 +77,7 @@ private struct CustomApiFormValues {
 
 private final class TextPreviewWindowController: NSObject, NSWindowDelegate {
   private let window: NSWindow
+  private var closingWithResponse: NSApplication.ModalResponse?
 
   init(title: String, content: String) {
     self.window = NSWindow(
@@ -90,6 +91,7 @@ private final class TextPreviewWindowController: NSObject, NSWindowDelegate {
   }
 
   func runModal() {
+    closingWithResponse = nil
     NSApp.activate(ignoringOtherApps: true)
     window.center()
     window.makeKeyAndOrderFront(nil)
@@ -98,7 +100,7 @@ private final class TextPreviewWindowController: NSObject, NSWindowDelegate {
   }
 
   func windowWillClose(_ notification: Notification) {
-    if NSApp.modalWindow === window {
+    if NSApp.modalWindow === window && closingWithResponse == nil {
       NSApp.stopModal(withCode: .cancel)
     }
   }
@@ -173,6 +175,7 @@ private final class TextPreviewWindowController: NSObject, NSWindowDelegate {
   }
 
   @objc private func closeWindow() {
+    closingWithResponse = .OK
     NSApp.stopModal(withCode: .OK)
     window.close()
   }
@@ -194,6 +197,7 @@ private final class CustomApiAccountFormWindowController: NSObject, NSTextFieldD
   private let cancelButton = NSButton(title: "取消", target: nil, action: nil)
   private let testHandler: (CustomApiFormValues, @escaping (Result<String, Error>) -> Void) -> Void
   private var result: CustomApiFormValues?
+  private var closingWithResponse: NSApplication.ModalResponse?
 
   init(
     defaultBaseURL: String,
@@ -217,6 +221,7 @@ private final class CustomApiAccountFormWindowController: NSObject, NSTextFieldD
   }
 
   func runModal() -> CustomApiFormValues? {
+    closingWithResponse = nil
     NSApp.activate(ignoringOtherApps: true)
     window.center()
     window.makeKeyAndOrderFront(nil)
@@ -226,7 +231,7 @@ private final class CustomApiAccountFormWindowController: NSObject, NSTextFieldD
   }
 
   func windowWillClose(_ notification: Notification) {
-    if NSApp.modalWindow === window {
+    if NSApp.modalWindow === window && closingWithResponse == nil {
       NSApp.stopModal(withCode: .cancel)
     }
   }
@@ -647,6 +652,7 @@ private final class CustomApiAccountFormWindowController: NSObject, NSTextFieldD
   }
 
   private func close(with response: NSApplication.ModalResponse) {
+    closingWithResponse = response
     NSApp.stopModal(withCode: response)
     window.close()
   }
@@ -859,11 +865,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       button.toolTip = "codex-switch"
       button.alphaValue = 1.0
       button.appearsDisabled = false
-      button.contentTintColor = statusIconColor()
+      button.contentTintColor = nil
 
       if let icon = loadStatusIcon() {
         button.image = icon
-        button.image?.isTemplate = true
+        button.image?.isTemplate = false
         button.imagePosition = .imageOnly
         button.imageScaling = .scaleProportionallyDown
       } else {
@@ -892,9 +898,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     let targetSize = NSSize(width: 16, height: 16)
-    image.isTemplate = true
-    image.size = targetSize
-    return image
+    let rect = NSRect(origin: .zero, size: targetSize)
+    let tintedImage = NSImage(size: targetSize)
+
+    tintedImage.lockFocus()
+    NSGraphicsContext.current?.imageInterpolation = .high
+    image.draw(
+      in: rect,
+      from: NSRect(origin: .zero, size: image.size),
+      operation: .sourceOver,
+      fraction: 1.0
+    )
+    statusIconColor().set()
+    rect.fill(using: .sourceAtop)
+    tintedImage.unlockFocus()
+    tintedImage.isTemplate = false
+
+    return tintedImage
   }
 
   private func scheduleAutoRefresh() {
@@ -1662,7 +1682,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = values.model.isEmpty ? "gpt-5.4" : values.model
     let reasoning = values.reasoningEffort.isEmpty ? "xhigh" : values.reasoningEffort
 
-    runAsync {
+    runAsync(successMessage: "已保存自定义 API 账号。") {
       _ = try self.runCLI(arguments: [
         "add-custom-api",
         "--name", values.name,

@@ -12,6 +12,7 @@ import {
   removeStoredAccount,
   saveCustomApiAccount,
   switchToAccount,
+  syncSessionsToCurrentProvider,
   testCustomApiConnection,
 } from "./lib/accounts.js";
 
@@ -160,6 +161,14 @@ async function run(): Promise<void> {
       return;
     }
 
+    case "sync-sessions": {
+      printJson({
+        ok: true,
+        ...(await syncSessionsToCurrentProvider()),
+      });
+      return;
+    }
+
     case "use": {
       const name = args[0];
       if (!name) {
@@ -167,12 +176,12 @@ async function run(): Promise<void> {
       }
 
       const restoreConfig = args.includes("--restore-config");
-      const account = await switchToAccount(name, { restoreConfig });
-      const appliedRestoreConfig = Boolean(restoreConfig || account.meta.requiresConfig);
+      const result = await switchToAccount(name, { restoreConfig });
       printJson({
         ok: true,
-        active: account.meta.name,
-        restoreConfig: appliedRestoreConfig,
+        active: result.account.meta.name,
+        restoreConfig: result.restoreConfig,
+        sessionSync: result.sessionSync,
       });
       return;
     }

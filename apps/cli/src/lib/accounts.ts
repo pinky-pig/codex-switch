@@ -9,6 +9,7 @@ import {
   CODEX_HOME,
   CONFIG_FILE,
   LEGACY_LOCAL_ACCOUNTS_DIR,
+  STORE_DIR,
 } from "./constants.js";
 import {
   copyFileSecure,
@@ -33,10 +34,13 @@ import type {
   SaveAccountOptions,
   SaveCustomApiAccountOptions,
   SaveCustomApiAccountResult,
-  StoredAccountUsage,
   StoredAccount,
   StoredAccountKind,
   StoredAccountMeta,
+  StoredAccountUsage,
+  SessionSyncDatabaseResult,
+  SessionSyncResult,
+  SwitchAccountResult,
   SwitchAccountOptions,
   TestCustomApiConnectionResult,
 } from "../types.js";
@@ -44,6 +48,7 @@ import type {
 const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const REFRESH_URL = "https://auth.openai.com/oauth/token";
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+const SESSION_SYNC_BACKUPS_DIR = path.join(STORE_DIR, "backups", "session-provider-sync");
 
 type ParsedCustomConfig = {
   modelProvider?: string;
@@ -52,6 +57,13 @@ type ParsedCustomConfig = {
   providerName?: string;
   wireApi?: string;
   reasoningEffort?: string;
+};
+
+type ThreadProviderStats = {
+  totalThreads: number;
+  unarchivedThreads: number;
+  threadsNeedingSync: number;
+  providers: string[];
 };
 
 function decodeBase64Url(input: string): string {
@@ -521,6 +533,235 @@ function mergeCustomApiConfig(existingContent: string | undefined, customContent
   const sectionOutput = trimTomlDocument(sectionPieces.filter(Boolean).join("\n\n"));
 
   return `${trimTomlDocument([rootOutput, sectionOutput].filter(Boolean).join("\n\n"))}\n`;
+}
+
+function escapeSqlString(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+function buildSessionSyncTimestamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+async function execFileText(
+  command: string,
+  args: string[],
+  options: {
+    maxBuffer?: number;
+  } = {},
+): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    execFile(
+      command,
+      args,
+      {
+        env: process.env,
+        maxBuffer: options.maxBuffer ?? 20 * 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr?.trim() || stdout?.trim() || error.message));
+          return;
+        }
+
+        resolve(stdout);
+      },
+    );
+  });
+}
+
+async function runSqlite(
+  databasePath: string,
+  sql: string,
+  options: {
+    separator?: string;
+  } = {},
+): Promise<string> {
+  const args = ["-batch"];
+
+  if (options.separator) {
+    args.push("-noheader", "-separator", options.separator);
+  }
+
+  args.push(databasePath, sql);
+  return await execFileText("sqlite3", args);
+}
+
+async function listCodexStateDatabasePaths(): Promise<string[]> {
+  if (!(await pathExists(CODEX_HOME))) {
+    return [];
+  }
+
+  const entries = await fs.readdir(CODEX_HOME, { withFileTypes: true });
+  const candidates = await Promise.all(
+    entries
+      .filter((entry) => entry.isFile() && /^state(?:_\d+)?\.sqlite$/i.test(entry.name))
+      .map(async (entry) => {
+        const databasePath = path.join(CODEX_HOME, entry.name);
+        const stats = await fs.stat(databasePath);
+        return {
+          databasePath,
+          modifiedAt: stats.mtimeMs,
+        };
+      }),
+  );
+
+  return candidates
+    .sort((left, right) => right.modifiedAt - left.modifiedAt)
+    .map((candidate) => candidate.databasePath);
+}
+
+async function hasThreadsTable(databasePath: string): Promise<boolean> {
+  const output = await runSqlite(
+    databasePath,
+    "select name from sqlite_master where type='table' and name='threads';",
+  );
+
+  return output.trim() === "threads";
+}
+
+async function readThreadProviderStats(
+  databasePath: string,
+  targetProvider: string,
+): Promise<ThreadProviderStats> {
+  const escapedProvider = escapeSqlString(targetProvider);
+  const sql = [
+    "select 'total' || char(9) || count(*) from threads;",
+    "select 'unarchived' || char(9) || count(*) from threads where archived = 0;",
+    `select 'needs_sync' || char(9) || count(*) from threads where model_provider <> '${escapedProvider}';`,
+    "select 'provider' || char(9) || model_provider || char(9) || count(*) from threads group by model_provider order by count(*) desc, model_provider asc;",
+  ].join(" ");
+  const output = await runSqlite(databasePath, sql, { separator: "\t" });
+
+  const stats: ThreadProviderStats = {
+    totalThreads: 0,
+    unarchivedThreads: 0,
+    threadsNeedingSync: 0,
+    providers: [],
+  };
+
+  for (const line of output.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    const [kind, value] = trimmed.split("\t");
+    if (kind === "total") {
+      stats.totalThreads = Number.parseInt(value ?? "0", 10) || 0;
+      continue;
+    }
+
+    if (kind === "unarchived") {
+      stats.unarchivedThreads = Number.parseInt(value ?? "0", 10) || 0;
+      continue;
+    }
+
+    if (kind === "needs_sync") {
+      stats.threadsNeedingSync = Number.parseInt(value ?? "0", 10) || 0;
+      continue;
+    }
+
+    if (kind === "provider" && value) {
+      stats.providers.push(value);
+    }
+  }
+
+  return stats;
+}
+
+async function backupStateDatabase(databasePath: string, backupPath: string): Promise<void> {
+  await ensureDir(path.dirname(backupPath));
+
+  try {
+    await runSqlite(databasePath, `VACUUM INTO '${escapeSqlString(backupPath)}';`);
+  } catch {
+    await copyFileSecure(databasePath, backupPath);
+  }
+}
+
+async function exportThreadManifest(databasePath: string, manifestPath: string): Promise<void> {
+  const sql = [
+    "select id || char(9) || model_provider || char(9) || archived || char(9) || replace(replace(title, char(9), ' '), char(10), ' ')",
+    "from threads",
+    "order by updated_at desc, id desc;",
+  ].join(" ");
+  const output = await runSqlite(databasePath, sql, { separator: "\t" });
+  const header = "id\tmodel_provider\tarchived\ttitle\n";
+  const body = output.trim().length > 0 ? `${output.trimEnd()}\n` : "";
+  await writeTextAtomic(manifestPath, `${header}${body}`);
+}
+
+async function getConfiguredModelProvider(): Promise<string> {
+  const configContent = await safeReadText(CONFIG_FILE);
+  return readTomlString(configContent ?? "", "model_provider") ?? "openai";
+}
+
+export async function syncSessionsToCurrentProvider(
+  targetProviderOverride?: string,
+): Promise<SessionSyncResult> {
+  const targetProvider = targetProviderOverride?.trim() || (await getConfiguredModelProvider());
+  const databasePaths = await listCodexStateDatabasePaths();
+  const databases: SessionSyncDatabaseResult[] = [];
+  let backupDir: string | undefined;
+
+  for (const databasePath of databasePaths) {
+    if (!(await hasThreadsTable(databasePath))) {
+      continue;
+    }
+
+    const before = await readThreadProviderStats(databasePath, targetProvider);
+    const databaseResult: SessionSyncDatabaseResult = {
+      databasePath,
+      totalThreads: before.totalThreads,
+      unarchivedThreads: before.unarchivedThreads,
+      updatedThreads: 0,
+      providersBefore: before.providers,
+      providersAfter: before.providers,
+    };
+
+    if (before.threadsNeedingSync > 0) {
+      if (!backupDir) {
+        backupDir = path.join(
+          SESSION_SYNC_BACKUPS_DIR,
+          `provider-sync-${buildSessionSyncTimestamp()}`,
+        );
+        await ensureDir(backupDir);
+      }
+
+      const fileStem = path.basename(databasePath, ".sqlite");
+      const backupPath = path.join(backupDir, `${fileStem}.before-sync.sqlite`);
+      const manifestPath = path.join(backupDir, `${fileStem}.threads.tsv`);
+
+      await backupStateDatabase(databasePath, backupPath);
+      await exportThreadManifest(databasePath, manifestPath);
+      await runSqlite(
+        databasePath,
+        [
+          "begin immediate;",
+          `update threads set model_provider = '${escapeSqlString(targetProvider)}' where model_provider <> '${escapeSqlString(targetProvider)}';`,
+          "commit;",
+        ].join(" "),
+      );
+
+      const after = await readThreadProviderStats(databasePath, targetProvider);
+      databaseResult.backupPath = backupPath;
+      databaseResult.manifestPath = manifestPath;
+      databaseResult.updatedThreads = before.threadsNeedingSync;
+      databaseResult.totalThreads = after.totalThreads;
+      databaseResult.unarchivedThreads = after.unarchivedThreads;
+      databaseResult.providersAfter = after.providers;
+    }
+
+    databases.push(databaseResult);
+  }
+
+  return {
+    targetProvider,
+    changed: databases.some((database) => database.updatedThreads > 0),
+    backupDir,
+    databases,
+  };
 }
 
 type UsageApiWindow = {
@@ -1312,7 +1553,7 @@ export async function getStoredAccount(name: string): Promise<StoredAccount> {
 export async function switchToAccount(
   name: string,
   options: SwitchAccountOptions = {},
-): Promise<StoredAccount> {
+): Promise<SwitchAccountResult> {
   const account = await getStoredAccount(name);
   const authContent = await safeReadText(account.authPath);
 
@@ -1336,7 +1577,27 @@ export async function switchToAccount(
     }
   }
 
-  return account;
+  const restoreConfig = shouldRestoreConfigForAccount(account, options);
+  let sessionSync: SessionSyncResult | undefined;
+
+  if (options.syncSessions !== false) {
+    try {
+      sessionSync = await syncSessionsToCurrentProvider();
+    } catch (error) {
+      sessionSync = {
+        targetProvider: await getConfiguredModelProvider(),
+        changed: false,
+        databases: [],
+        error: error instanceof Error ? error.message : "Unknown session sync error.",
+      };
+    }
+  }
+
+  return {
+    account,
+    restoreConfig,
+    sessionSync,
+  };
 }
 
 export async function removeStoredAccount(name: string): Promise<void> {

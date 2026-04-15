@@ -20,6 +20,7 @@ import {
   saveCurrentAccount,
   saveCustomApiAccount,
   switchToAccount,
+  syncSessionsToCurrentProvider,
   testCustomApiConnection,
 } from "./lib/accounts.js";
 import { SwitchApp } from "./ui.js";
@@ -122,21 +123,29 @@ async function run(): Promise<void> {
     });
 
   program
+    .command("sync-sessions")
+    .description("Remap local Codex threads to the currently configured model provider.")
+    .action(async () => {
+      printJson({
+        ok: true,
+        ...(await syncSessionsToCurrentProvider()),
+      });
+    });
+
+  program
     .command("use")
     .description("Switch to a saved account snapshot.")
     .argument("<name>", "snapshot name")
     .option("--restore-config", "restore saved config.toml if present")
     .action(async (name: string, options: { restoreConfig?: boolean }) => {
-      const account = await switchToAccount(name, {
+      const result = await switchToAccount(name, {
         restoreConfig: Boolean(options.restoreConfig),
       });
-      const appliedRestoreConfig = Boolean(
-        options.restoreConfig || account.meta.requiresConfig,
-      );
       printJson({
         ok: true,
-        active: account.meta.name,
-        restoreConfig: appliedRestoreConfig,
+        active: result.account.meta.name,
+        restoreConfig: result.restoreConfig,
+        sessionSync: result.sessionSync,
       });
     });
 

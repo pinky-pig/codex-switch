@@ -83,6 +83,32 @@ export interface SaveCustomApiAccountOptions {
 
 export interface SwitchAccountOptions {
   restoreConfig?: boolean;
+  syncSessions?: boolean;
+}
+
+export interface SessionSyncDatabaseResult {
+  databasePath: string;
+  backupPath?: string;
+  manifestPath?: string;
+  totalThreads: number;
+  unarchivedThreads: number;
+  updatedThreads: number;
+  providersBefore: string[];
+  providersAfter: string[];
+}
+
+export interface SessionSyncResult {
+  targetProvider: string;
+  changed: boolean;
+  backupDir?: string;
+  databases: SessionSyncDatabaseResult[];
+  error?: string;
+}
+
+export interface SwitchAccountResult {
+  account: StoredAccount;
+  restoreConfig: boolean;
+  sessionSync?: SessionSyncResult;
 }
 
 export interface RuntimeStatus {
