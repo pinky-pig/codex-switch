@@ -535,6 +535,29 @@ function mergeCustomApiConfig(existingContent: string | undefined, customContent
   return `${trimTomlDocument([rootOutput, sectionOutput].filter(Boolean).join("\n\n"))}\n`;
 }
 
+function mergeModelProviderConfig(
+  existingContent: string | undefined,
+  targetProvider: string,
+): string {
+  const existing = existingContent ?? "";
+  let cleaned = removeRootKeyLine(existing, "model_provider");
+  cleaned = trimTomlDocument(cleaned);
+
+  const firstSectionIndex = cleaned.search(/^\[/m);
+  const rootPart =
+    firstSectionIndex >= 0 ? cleaned.slice(0, firstSectionIndex).trim() : cleaned.trim();
+  const sectionPart =
+    firstSectionIndex >= 0 ? cleaned.slice(firstSectionIndex).trim() : "";
+
+  const rootOutput = trimTomlDocument(
+    [rootPart, `model_provider = ${quoteTomlString(targetProvider)}`]
+      .filter(Boolean)
+      .join("\n\n"),
+  );
+
+  return `${trimTomlDocument([rootOutput, sectionPart].filter(Boolean).join("\n\n"))}\n`;
+}
+
 function escapeSqlString(value: string): string {
   return value.replace(/'/g, "''");
 }
@@ -1555,6 +1578,7 @@ export async function switchToAccount(
   options: SwitchAccountOptions = {},
 ): Promise<SwitchAccountResult> {
   const account = await getStoredAccount(name);
+  const accountKind = inferStoredAccountKind(account);
   const authContent = await safeReadText(account.authPath);
 
   if (!authContent) {
@@ -1567,7 +1591,7 @@ export async function switchToAccount(
   if (shouldRestoreConfigForAccount(account, options) && account.configPath) {
     const configContent = await safeReadText(account.configPath);
     if (configContent) {
-      if (inferStoredAccountKind(account) === "custom-api") {
+      if (accountKind === "custom-api") {
         const liveConfig = await safeReadText(CONFIG_FILE);
         const mergedConfig = mergeCustomApiConfig(liveConfig, configContent);
         await writeTextAtomic(CONFIG_FILE, mergedConfig);
@@ -1576,6 +1600,11 @@ export async function switchToAccount(
       }
     }
   }
+
+  const targetModelProvider = accountKind === "custom-api" ? "custom" : "openai";
+  const liveConfig = await safeReadText(CONFIG_FILE);
+  const providerSyncedConfig = mergeModelProviderConfig(liveConfig, targetModelProvider);
+  await writeTextAtomic(CONFIG_FILE, providerSyncedConfig);
 
   const restoreConfig = shouldRestoreConfigForAccount(account, options);
   let sessionSync: SessionSyncResult | undefined;
